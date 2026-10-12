@@ -144,3 +144,73 @@
   backend-unavailable path returns a safe tool error. Test subprocesses are cleaned up.
 - The existing local demo database still has 60 tickets. It was not reseeded or
   modified by Phase 2 tests. SDK 2.3.0 and HTTPX2 2.13.1 are recorded in the lockfile.
+
+## Phase 3 — approved 2026-10-12
+
+### Step 1: restricted writes and draft storage
+
+- `update_ticket` may change category and priority only. No status transitions,
+  subject/body edits, contact/company changes, approval, or sending operations.
+- Add only a `draft_replies` table, preserving existing Phase 1/2 databases. Status
+  is always `draft`, enforced by a database CHECK constraint as well as schemas.
+  Future human approval in Phase 6 will need an explicit schema migration.
+- Minimal REST writes: POST `/tickets/{id}/drafts`, POST `/tickets/{id}/notes`,
+  PATCH `/tickets/{id}`. Bodies are nonblank, trimmed, at most 10,000 characters;
+  unexpected fields and null/empty classification updates are rejected.
+- `draft_reply` stores supplied text. No AI generation, external messaging, editing
+  existing drafts, or approval endpoint is implemented. Notes have fixed author
+  `Dispatch MCP` rather than accepting an impersonated author from tool input.
+- `DISPATCH_READ_ONLY` defaults to true; only explicit true/false are accepted.
+  The provider denies mutations by default, and REST independently guards tool-write
+  routes. Existing POST `/tickets` intake is exempt. Both processes need write mode
+  enabled for MCP mutations. No automatic retries after ambiguous write failures.
+
+### Step 2: write tools, fail-closed policy, and audit journal
+
+- Always advertise all six tools so clients see precise write schemas, even in
+  read-only mode. SDK middleware blocks write dispatch before provider calls; tool,
+  provider, and REST guards additionally enforce the policy. Mode is trusted process
+  configuration, not a tool parameter; changes require restarting both processes.
+- Audit decoded `tools/call` requests at the official SDK middleware boundary, before
+  argument validation, including unknown tools, validation errors, policy rejections,
+  backend failures, and cancellations. Other protocol messages are not tool calls.
+- Audit JSONL is separate from PSA/provider storage so backend outages remain logged.
+  Default file `data/audit.jsonl`; append with O_APPEND, restrictive creation mode,
+  a single bounded write per event, and fsync. It is not tamper-proof or a distributed
+  logging system; raw malformed JSON/transport failures cannot be decoded into calls.
+- Persist `started` before execution and `finished` afterward, sharing a UUID call ID,
+  UTC times, mode, safe tool label, outcome, and duration. Record only allowlisted IDs,
+  enums, numeric bounds, argument count, and text lengths. No bodies/queries/results/
+  exception messages/arbitrary keys, headers, or request IDs are copied into audit.
+  Unknown/malformed tool names use `unknown_tool` rather than echoing untrusted text.
+- If start auditing fails, reject without execution. If completion auditing fails,
+  report that execution may have happened; the durable start remains evidence of an
+  indeterminate call. Audit failure is not transactional rollback of a REST write.
+  A tool error also does not guarantee a write had no effect; do not blindly retry.
+- Read-only still appends audit records, while leaving PSA records unchanged. Approval,
+  sending, UI audit endpoints, embeddings, reporting, and agents remain out of scope.
+
+### Step 3: real-process writes and operating instructions
+
+- Verify both SDK auto and legacy handshake transports with separately running backend
+  and MCP processes. Check all three permitted writes, persisted draft status, invalid
+  status/approval attempts, unchanged company/contact records, and complete redacted
+  audit pairs. Verify MCP write mode cannot bypass a read-only backend.
+- Declare AnyIO directly because audit code uses its worker-thread and cancellation
+  APIs. It was already installed as a FastAPI/SDK runtime dependency; no new framework
+  or package installation is introduced. Keep the existing Poetry lockfile workflow.
+- README documents safe defaults, restarting both processes, host environment overrides,
+  local JSONL inspection, audit failure uncertainty, draft verification, and restoring
+  read-only mode. No early UI endpoints, external messages, agent, or AI API calls.
+
+### Verification
+
+- All 234 pytest cases pass without warnings; Ruff lint/format, Poetry lockfile checks,
+  and whitespace checks pass. Tests use isolated SQLite and audit paths.
+- Six real-process stdio cases pass, including safe writes in auto/legacy modes and
+  MCP-write/backend-read-only mismatch. Drafts remain `draft`, status/approval attempts
+  fail, and both allowed mutations and redacted audit outcomes are verified.
+- Audit tests cover failed/unknown/invalid calls, cancellation, concurrent append,
+  start failure preventing execution, and completion failure after a committed write.
+- No demo reset/reseed or local write test was performed. The existing local database
+  is retained; only temporary databases/journals were used for write verification.

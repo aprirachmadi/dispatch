@@ -1,9 +1,9 @@
 # Dispatch
 
 A synthetic NorthPoint IT helpdesk portfolio project. **Demo only:** no authentication,
-no real client data, and no production use. Phases 1–2 provide the mock PSA REST API
-and a read-only MCP server. Write tools, agents, evaluations, UI, and Docker are
-intentionally not implemented yet.
+no real client data, and no production use. Phases 1–3 provide the mock PSA REST API,
+an MCP server with default-denied draft-only writes, and redacted audit logging.
+Agents, evaluations, UI, approval/sending, and Docker are not implemented yet.
 
 ## Development setup
 
@@ -73,7 +73,7 @@ POST requires an existing `company_id`, subject (1–200 characters), and descri
 (1–10,000 characters). `contact_id` and category are optional; priority defaults to
 `medium`. A contact must belong to the company. New tickets always have status `new`;
 clients cannot set timestamps, status, or internal notes. Unknown references return
-404; invalid inputs return 422. No write APIs for notes or existing tickets yet.
+404; invalid inputs return 422. Phase 3's separate guarded writes are described below.
 
 ### Try it
 
@@ -116,12 +116,12 @@ DISPATCH_DATABASE_URL=sqlite:///./data/demo-2.db poetry run uvicorn dispatch.moc
 
 - SLA tiers: Gold = 1h response, Silver = 4h, Bronze = next business day. No deadline
   calculations yet; business calendar rules are deferred.
-- No authentication, write tools, AI agent, labeled evals, draft approval, UI, or Docker.
+- No authentication, AI agent, labeled evals, draft approval, UI, or Docker.
 - **Local demo only:** bind to loopback. Do not expose it publicly or store real data.
 - The official SDK v2 uses HTTPX2, also used by the REST adapter and installed
   Starlette TestClient. The earlier HTTPX deprecation warning is now resolved.
 
-## Phase 2: read-only MCP server
+## MCP server (Phases 2–3)
 
 Uses the **official `mcp` SDK v2**, locked by Poetry (initially 2.3.0), with its
 `MCPServer` class. This is the renamed v1 `FastMCP`, **not** the separate third-party
@@ -157,7 +157,11 @@ on your host). Using `.venv/bin/python` avoids dependence on the host's Poetry P
     "dispatch": {
       "command": "/absolute/path/to/dispatch/.venv/bin/python",
       "args": ["-m", "dispatch.mcp_server.server"],
-      "env": {"DISPATCH_PSA_BASE_URL": "http://127.0.0.1:8000"}
+      "env": {
+        "DISPATCH_PSA_BASE_URL": "http://127.0.0.1:8000",
+        "DISPATCH_READ_ONLY": "true",
+        "DISPATCH_AUDIT_PATH": "/absolute/path/to/dispatch/data/audit.jsonl"
+      }
     }
   }
 }
@@ -180,15 +184,15 @@ REST values above. Text search is literal and excludes internal notes. Empty sea
 return `tickets: []`; nonexistent single-record reads return tool errors. Unexpected
 tool arguments are rejected. Return values use the SDK's structured content.
 
-The adapter performs only GET requests, does not follow redirects, applies five-second
+The read tools perform only GET requests. The adapter does not follow redirects, applies five-second
 per-operation network timeouts, and caps each backend response at 5 MiB. Missing records,
 network failures, and malformed responses become safe tool errors, not raw backend bodies.
 Requests use the trusted configured URL, never a URL taken from ticket text/tool input.
 
 Read-only annotations and untrusted-text warnings describe behavior; they are **not**
-a complete prompt-injection defense. The implementation exposes no mutations, approval,
-sending, AI sampling, or AI calls. Audit logging and a configurable mode flag belong to
-Phase 3; embeddings and weekly reports belong to Phase 4.
+a complete prompt-injection defense. Phase 3 permits only the guarded mutations below;
+it exposes no approval, sending, AI sampling, or AI calls. Embeddings and weekly reports
+belong to Phase 4.
 
 ### Verify the MCP boundary
 
@@ -203,9 +207,105 @@ poetry run ruff format --check .
 poetry check --lock
 ```
 
-The stdio tests discover all three tools, read the three seed traps, check invalid/
-unknown tools and backend unavailability, and compare **every persisted record** before
-and after. They never use or modify your local demo database.
+The stdio tests discover all six tools, read the three seed traps, check invalid/
+unknown tools and backend unavailability, and verify **every persisted record** is
+unchanged in read-only mode. Write-mode tests verify only the intended mutations and
+that saved replies remain drafts. They never use or modify your local demo database.
+
+## Phase 3: draft-only writes and audit logging
+
+### Default-deny mode
+
+`DISPATCH_READ_ONLY=true` is the default for both processes. All six MCP tools remain
+discoverable, but the three write tools are blocked before provider dispatch. The
+provider and backend additionally reject writes independently. Existing `POST /tickets`
+intake and append-only audit logging remain allowed. Read-only is an application policy,
+not a claim that the audit file or SQLite schema initialization is filesystem read-only.
+
+To enable safe writes, set `DISPATCH_READ_ONLY=false` in `.env` and **restart both**
+uvicorn and the MCP host/server. Only explicit true/false values are accepted; a typo
+fails startup instead of enabling writes. Host environment variables override `.env`.
+If using the host configuration above, change its mode too, or it stays read-only.
+
+Alternatively, for a deliberate local write-mode demo, use two terminals from repo root:
+
+```bash
+# Terminal 1 (stop any old API first):
+DISPATCH_READ_ONLY=false poetry run uvicorn dispatch.mock_psa.main:app --reload --host 127.0.0.1
+# MCP launch command / Terminal 2 (normally launched by an MCP host):
+DISPATCH_READ_ONLY=false poetry run python -m dispatch.mcp_server.server
+```
+
+An existing database needs no reset or reseed: startup adds the `draft_replies` table
+without altering existing tables. The seed intentionally creates no drafts.
+
+### Write tool contracts
+
+| Tool | Allowed parameters and behavior |
+| --- | --- |
+| `draft_reply` | `ticket_id`, `body` (1–10,000 nonblank, trimmed characters). Store supplied text as a **new draft**. No AI generation, editing, approval, or sending. |
+| `add_internal_note` | `ticket_id`, `body` (same limits). Append an internal note authored by `Dispatch MCP`; never notify a contact. |
+| `update_ticket` | `ticket_id`, optional category/priority enums. At least one non-null value required; omitted fields stay unchanged. **No status transitions** or other edits. |
+
+All IDs must be positive signed 64-bit integers. Unknown fields, including `status`,
+`author_name`, `recipient`, and `approve`, are rejected. Read-only attempts return tool
+errors. `draft_reply` and notes append on each successful call: **do not blindly retry**
+after an error or timeout, since the backend may already have committed the write.
+No automatic HTTP retries are implemented. Stored text is untrusted and never executed.
+
+Minimal backend routes (403 in read-only mode; 404 for missing tickets, 422 for invalid data):
+
+- `POST /tickets/{id}/drafts` with `{"body":"..."}` → 201 and draft record/status.
+- `POST /tickets/{id}/notes` with `{"body":"..."}` → 201 and internal note.
+- `PATCH /tickets/{id}` with `{"category":"security","priority":"urgent"}` → updated ticket.
+
+The database itself constrains draft status to `draft`. Phase 6's future technician
+approval requires an explicit schema migration and separate API; none exists now.
+Drafts can currently be verified in tool results or directly in the synthetic SQLite
+database. No UI-specific draft-list/approval/audit-view endpoints are added early.
+
+### Audit journal
+
+`DISPATCH_AUDIT_PATH` defaults to `./data/audit.jsonl`, relative to the MCP process
+working directory. Use an absolute path in a host configuration. The file is local to
+MCP, independent of backend availability, and excluded from Git by `data/`.
+
+Each decoded MCP `tools/call` attempt produces a durable `started` event before
+execution and a `finished` event afterward, sharing a UUID `call_id`. Includes UTC
+timestamps, a safe tool label, mode, duration, and `success`/`error`/`blocked`/`cancelled`
+outcome. Validation failures, unknown tools, backend failures, and denied writes are
+audited too. Discovery/handshake messages and raw undecodable transport input are not
+tool calls. Audit records allowlist only IDs, enums, numeric limits, argument count,
+and text lengths—not ticket/reply/query bodies, arbitrary argument keys, results,
+exception messages, headers, or secrets. Unknown tool names use `unknown_tool`.
+
+Example pair (illustrative):
+
+```json
+{"call_id":"example-uuid","tool":"draft_reply","read_only":true,"event":"started","timestamp":"2026-10-12T09:00:00+00:00","arguments":{"argument_count":2,"ticket_id":31,"body_length":40}}
+{"call_id":"example-uuid","tool":"draft_reply","read_only":true,"event":"finished","timestamp":"2026-10-12T09:00:00+00:00","outcome":"blocked","duration_ms":0}
+```
+
+The file is appended, never cleared by the application; each event is bounded, appended
+once, and flushed to disk. It is **not tamper-proof**, rotated automatically, or a
+distributed multi-host log service. Keep the local directory private and writable.
+
+If the start append fails, the tool is not executed. If the completion append fails,
+the call may already have succeeded: the saved start remains, and the client gets an
+explicit uncertainty error. An unmatched `started` event also can indicate a crash or
+interruption; never assume rollback. Direct REST calls are not MCP tool calls and do
+not enter this journal; auditing human actions belongs to later backend/UI work.
+
+Inspect locally (this is not a UI or backend audit-list endpoint):
+
+```bash
+tail -n 10 data/audit.jsonl
+poetry run pytest tests/test_write_api.py tests/test_write_mcp.py tests/test_audit.py
+poetry run pytest tests/test_mcp_stdio.py -v
+```
+
+After write-mode exploration, restore `DISPATCH_READ_ONLY=true` and restart both
+processes. All tests use temporary data/audit paths, not your demo database or journal.
 
 Reference documentation: [Official MCP SDK](https://github.com/modelcontextprotocol/python-sdk),
 [v2 migration guide](https://py.sdk.modelcontextprotocol.io/migration/),

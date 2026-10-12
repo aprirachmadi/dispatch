@@ -19,11 +19,12 @@ from dispatch.mcp_server.providers.models import (
     TicketSearch,
     TicketSearchResult,
 )
+from dispatch.mcp_server.state import ServerState
 
 READ_ONLY = ToolAnnotations(
     read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False
 )
-ToolContext = Context[TicketProvider, Any]
+ToolContext = Context[ServerState, Any]
 
 
 def _provider(ctx: ToolContext, allowed: set[str]) -> TicketProvider:
@@ -32,10 +33,10 @@ def _provider(ctx: ToolContext, allowed: set[str]) -> TicketProvider:
     arguments = (ctx.request_context.params or {}).get("arguments", {})
     if set(arguments) - allowed:
         raise ToolError("Unexpected tool arguments; use only the documented parameters.")
-    return ctx.request_context.lifespan_context
+    return ctx.request_context.lifespan_context.provider
 
 
-def register_read_tools(server: MCPServer[TicketProvider]) -> None:
+def register_read_tools(server: MCPServer[ServerState]) -> None:
     """Register only the three Phase 2 read tools on an SDK server."""
 
     @server.tool(annotations=READ_ONLY)

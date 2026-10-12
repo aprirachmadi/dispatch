@@ -12,6 +12,7 @@ from dispatch.mock_psa.database import create_db_engine, create_schema
 from dispatch.mock_psa.models import (
     Company,
     Contact,
+    DraftReply,
     Note,
     SLATier,
     Ticket,
@@ -396,7 +397,7 @@ def seed_database(engine: Engine, reference_time: datetime = REFERENCE_TIME) -> 
     with Session(engine) as session, session.begin():
         if any(
             session.scalar(select(model.id).limit(1)) is not None
-            for model in (Company, Contact, Ticket, Note)
+            for model in (Company, Contact, Ticket, Note, DraftReply)
         ):
             raise ValueError("Database is not empty; use a fresh synthetic demo database to seed.")
         companies = []

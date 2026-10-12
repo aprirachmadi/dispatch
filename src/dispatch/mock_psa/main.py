@@ -9,21 +9,27 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from dispatch.mock_psa.config import Settings, load_settings
-from dispatch.mock_psa.database import create_db_engine, create_schema
+from dispatch.mock_psa.database import create_db_engine, create_schema, utc_now
 from dispatch.mock_psa.models import (
     Company,
     Contact,
+    DraftReply,
+    Note,
     Ticket,
     TicketCategory,
     TicketPriority,
     TicketStatus,
 )
 from dispatch.mock_psa.schemas import (
+    BodyCreate,
     CompanyResponse,
     ContactResponse,
+    DraftReplyResponse,
+    NoteResponse,
     TicketCreate,
     TicketDetail,
     TicketResponse,
+    TicketUpdate,
 )
 
 Limit = Annotated[int, Query(ge=1, le=100, description="Maximum records, from 1 to 100.")]
@@ -42,15 +48,23 @@ def get_session(request: Request) -> Iterator[Session]:
 DBSession = Annotated[Session, Depends(get_session)]
 
 
+def require_write_mode(request: Request) -> None:
+    """Guard tool-write routes independently of the MCP server; intake stays enabled."""
+    if request.app.state.read_only:
+        raise HTTPException(status_code=403, detail="Tool writes are disabled in read-only mode")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build an app with an isolated lifespan-managed DB connection pool."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        engine = create_db_engine((settings or load_settings()).database_url)
+        config = settings or load_settings()
+        engine = create_db_engine(config.database_url)
         try:
             create_schema(engine)
             app.state.session_factory = sessionmaker(engine)
+            app.state.read_only = config.read_only
             yield
         finally:
             engine.dispose()
@@ -153,6 +167,57 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
         ticket = Ticket(**payload.model_dump())
         session.add(ticket)
+        session.commit()
+        session.refresh(ticket)
+        return ticket
+
+    def require_ticket(ticket_id: int, session: Session) -> Ticket:
+        ticket = session.get(Ticket, ticket_id)
+        if ticket is None:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        return ticket
+
+    @app.post(
+        "/tickets/{ticket_id}/drafts",
+        response_model=DraftReplyResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_write_mode)],
+    )
+    def create_draft(ticket_id: RecordID, payload: BodyCreate, session: DBSession):
+        """Store supplied reply text as draft only; no approval or sending endpoint exists."""
+        require_ticket(ticket_id, session)
+        draft = DraftReply(ticket_id=ticket_id, body=payload.body)
+        session.add(draft)
+        session.commit()
+        session.refresh(draft)
+        return draft
+
+    @app.post(
+        "/tickets/{ticket_id}/notes",
+        response_model=NoteResponse,
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_write_mode)],
+    )
+    def create_note(ticket_id: RecordID, payload: BodyCreate, session: DBSession):
+        """Append an internal MCP note, never an external reply or impersonated author."""
+        ticket = require_ticket(ticket_id, session)
+        note = Note(ticket_id=ticket_id, body=payload.body, author_name="Dispatch MCP")
+        ticket.updated_at = utc_now()
+        session.add(note)
+        session.commit()
+        session.refresh(note)
+        return note
+
+    @app.patch(
+        "/tickets/{ticket_id}",
+        response_model=TicketResponse,
+        dependencies=[Depends(require_write_mode)],
+    )
+    def update_ticket(ticket_id: RecordID, payload: TicketUpdate, session: DBSession):
+        """Change category and/or priority only; status and all other fields are forbidden."""
+        ticket = require_ticket(ticket_id, session)
+        for name, value in payload.model_dump(exclude_unset=True).items():
+            setattr(ticket, name, value)
         session.commit()
         session.refresh(ticket)
         return ticket

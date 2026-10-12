@@ -19,10 +19,17 @@ async def mcp_client(client):
             yield connection
 
 
-async def test_discovery_only_read_tools_with_precise_schemas(mcp_client):
+async def test_discovery_read_and_write_tools_with_precise_schemas(mcp_client):
     tools = {tool.name: tool for tool in (await mcp_client.list_tools()).tools}
-    assert set(tools) == {"search_tickets", "get_ticket", "get_company_context"}
-    for tool in tools.values():
+    assert set(tools) == {
+        "search_tickets",
+        "get_ticket",
+        "get_company_context",
+        "draft_reply",
+        "add_internal_note",
+        "update_ticket",
+    }
+    for tool in (tools[name] for name in ("search_tickets", "get_ticket", "get_company_context")):
         assert tool.annotations.read_only_hint is True
         assert tool.annotations.destructive_hint is False
         assert tool.annotations.idempotent_hint is True
@@ -94,7 +101,7 @@ async def test_invalid_ticket_arguments_are_tool_errors(mcp_client, arguments):
 async def test_missing_ticket_and_unknown_tool_are_errors(mcp_client):
     missing = await mcp_client.call_tool("get_ticket", {"ticket_id": 999})
     assert missing.is_error and "not found" in missing.content[0].text
-    assert (await mcp_client.call_tool("update_ticket", {"ticket_id": 1})).is_error
+    assert (await mcp_client.call_tool("approve_draft", {"ticket_id": 1})).is_error
 
 
 @pytest.mark.parametrize("company_id", [0, True, 999])

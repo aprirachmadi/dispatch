@@ -3,8 +3,8 @@
 from datetime import datetime
 from enum import StrEnum
 
+from sqlalchemy import CheckConstraint, ForeignKey, String, Text
 from sqlalchemy import Enum as SQLAlchemyEnum
-from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from dispatch.domain import SLATier as SLATier
@@ -78,3 +78,16 @@ class Note(Base):
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
     ticket: Mapped[Ticket] = relationship(back_populates="notes")
+
+
+class DraftReply(Base):
+    """An unsent reply; Phase 3 has no approval/sending transition at any layer."""
+
+    __tablename__ = "draft_replies"
+    __table_args__ = (CheckConstraint("status = 'draft'", name="draft_only_status"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="draft", server_default="draft")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)

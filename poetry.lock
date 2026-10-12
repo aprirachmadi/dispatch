@@ -1225,4 +1225,4 @@ standard = ["httptools (>=0.8.0)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.13"
-content-hash = "41d1e291227c49d77fb7ed0556998fe21cbc4c707d3b3a36bf70cb662a94ec03"
+content-hash = "0287e78b0a597021d21ea6f770b1c6f9440e630a6ad8408124d31a7a047eab02"

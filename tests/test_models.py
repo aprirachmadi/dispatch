@@ -10,8 +10,14 @@ from dispatch.mock_psa.database import create_db_engine
 from dispatch.mock_psa.models import Company, Contact, Note, SLATier, Ticket, TicketStatus
 
 
-def test_schema_contains_phase_one_tables(engine):
-    assert set(inspect(engine).get_table_names()) == {"companies", "contacts", "tickets", "notes"}
+def test_schema_contains_current_phase_tables(engine):
+    assert set(inspect(engine).get_table_names()) == {
+        "companies",
+        "contacts",
+        "tickets",
+        "notes",
+        "draft_replies",
+    }
 
 
 def test_relationships_and_utc_round_trip(engine):

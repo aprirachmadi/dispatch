@@ -19,6 +19,13 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def isolated_mcp_environment(monkeypatch, tmp_path):
+    """Tests never append to the user's audit file or enable writes via their .env."""
+    monkeypatch.setenv("DISPATCH_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("DISPATCH_READ_ONLY", "true")
+
+
 @pytest.fixture
 def engine(tmp_path) -> Iterator[Engine]:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
@@ -53,3 +60,11 @@ def client(tmp_path) -> Iterator[TestClient]:
     engine.dispose()
     with TestClient(create_app(Settings(database_url=database_url))) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def write_client(client):
+    """Reuse isolated fixture records through an app explicitly allowing tool writes."""
+    url = client.app.state.session_factory.kw["bind"].url.render_as_string()
+    with TestClient(create_app(Settings(database_url=url, read_only=False))) as writable:
+        yield writable
