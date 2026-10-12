@@ -315,3 +315,102 @@
   formatting, lockfile, and whitespace checks pass. Manually ran the remaining examples:
   eight tools discovered without a backend, 3/3 basic checks and 7/7 analytics checks
   passed against a temporary seeded API, and a full SQL snapshot remained unchanged.
+
+## Phase 5 — approved 2026-10-12
+
+### Step 1: provider-neutral model calls
+
+- Replace the original Claude requirement with explicit OpenAI-compatible Chat
+  Completions configuration. Use the official OpenAI SDK 3.29.0, locked with Poetry;
+  no LangChain, LangGraph, PydanticAI, hosted-agent API, native MCP or tool-calling
+  requirement. Pydantic validates outputs; Python selects tools and ticket IDs.
+- Require an explicit endpoint/model. Separate agent and offline judge configuration;
+  no fallback to another provider/model. Require HTTPS/credentials remotely; allow
+  keyless HTTP only on named loopback hosts, using a nonsecret SDK dummy credential.
+- Text JSON is the portable default. JSON object/schema modes and token-parameter
+  selection are explicit opt-ins. No temperature/reasoning-provider options by default.
+  Bound total call time, input characters/output tokens, and parsed output size; reject
+  duplicate JSON keys, nonfinite constants, wrong fields/enums and incomplete responses.
+  No SDK retries, redirect following or proxy-env use. Errors redact provider bodies.
+- Add triage and eval example entry points; no standalone connectivity checks or shared
+  launcher/warm-up scripts or dedicated tests for the examples. Application logic is
+  tested in main modules with deterministic model transports, not scored as real accuracy.
+
+### Step 2: bounded workflow and persistence
+
+- Classify source subject/description/company/SLA/timestamp only, excluding existing
+  labels, source notes and gold labels. Draft after up to three historical resolutions;
+  only strictly earlier, bounded notes are used, and truncated note collections omitted.
+- Category/priority remain existing enums. Urgency is immediate/same_day/routine;
+  security is a strict boolean. Define the policy explicitly in prompts and RUBRIC.md.
+  Code derives urgent/security attention flags, not an additional model permission.
+- Default preview forces MCP read-only mode and persists no PSA changes. Explicit
+  apply requires trusted write-enabled config; the backend enforces its own mode too.
+  Validate classification and draft before writes; retain assessment when drafting fails.
+- Apply writes category/priority, an unsent draft, then a structured internal completion
+  note with urgency/security/rationale/history/draft ID. No new DB tables are necessary.
+  Status stays new; no approval, sending, closing, merging, remediation or paging.
+- Inspect at most 100 new records, process 1–20 (default 5), stop on failures. Completion
+  notes skip successful earlier runs; truncated source notes require manual inspection.
+  This is not guaranteed idempotency/authentication. Concurrent agent runs unsupported.
+- Re-read source before applying to detect observed changes, not as a transactional
+  concurrency guarantee. Journal write intentions/confirmations privately with fsync
+  and atomic replacement. Writes are not one transaction; uncertain/partial results
+  stop further mutations. No blind retries. Existing report files are never overwritten.
+
+### Step 3: offline-only DeepEval and separate scoring
+
+- Add DeepEval 4.2.8 in an optional Poetry evals group, justified by user familiarity
+  and the core drafting requirement. Never import it in live triage. Shared lock
+  resolution selects compatible Click 8.3.3 and Hugging Face Hub 1.16.1 (down from the
+  earlier lock); verify the existing API/MCP/real embedding behavior after this change.
+- Forty developer-authored synthetic cases, independently labeled from evaluated models,
+  with frozen historical context and reference replies; six separate judge calibration
+  fixtures. Cover all categories/priorities/urgencies, casual urgent security, duplicates,
+  prompt injection and varied impact. This is a small development set, not production
+  accuracy or 40 independent samples. Review ground-truth policy judgments explicitly.
+- Reuse live classification/drafting functions with frozen inputs. The eval runner has
+  no PSA/MCP access or write path. It does not evaluate live retrieval ranking. Never
+  send expected labels/reference drafts/response requirements to the generator.
+- Deterministically score each field, all-class macro-F1, confusion matrices with missing
+  predictions, exact match and urgent/security recall. Count failures in denominators;
+  retain valid labels after draft failure. Report draft completion separately.
+- Two GEval metrics: reference/source correctness plus safety, and internal assessment
+  consistency. Wrong classification plus matching wrong draft can be consistent; never
+  blend draft scores into classification accuracy. Explicit versioned steps and score
+  bands, with serious safety/grounding failures assigned the lowest quality band.
+- Use a schema-aware, asynchronous custom judge adapter and the non-logprob scoring
+  path. Explicit judge endpoint/model only; disable telemetry/tracing/keyfile loading
+  and cloud uploads, including cached settings. No Confident AI account is needed.
+- Provisional 0.8 diagnostic threshold remains labeled uncalibrated. Run known-good/bad
+  fixtures and inspect score reasons before interpreting pass rates; no automatic
+  threshold tuning to a target score. Missing drafts fail completion automatically;
+  judge errors remain unassessed with coverage shown. Human review remains mandatory.
+- Optional no-judge and small-subset runs control cost; full current 40-case successful
+  run uses 80 generator and 80 judge calls. Reports retain hashes/versions/model names,
+  expected/generated pairs and explicit incomplete/interrupted states. Low quality is
+  a finding; missing outputs/judge failures are execution failures. No online retry gate.
+
+### Verification status
+
+- All 373 application tests pass with optional eval dependencies and real embedding
+  checks enabled, without warnings; Ruff, formatting, lockfile and whitespace checks
+  pass. Without the optional eval group/default real-model flag: 367 passed, six
+  intentional skips. Live agent imports do not load DeepEval, even when installed.
+- Manually verified example commands using a temporary local Chat Completions protocol
+  stand-in plus separate real MCP/FastAPI processes: connectivity, preview (full SQL
+  snapshot unchanged), apply (one unsent draft, status still new), repeat-skip, two-case
+  offline generation/judging, no-judge generation and six-fixture calibration. Reports
+  were temporary and discarded; no demo database/reset/reseed was used. These protocol
+  stand-in results are not LLM accuracy or judge calibration results.
+- Real LLM endpoint/model have not been selected; no external LLM calls or real accuracy
+  claim has been made. Real connectivity, triage, judge calibration and the 40-case
+  accuracy report remain the explicit user-configured verification step.
+- User explicitly requested leaving model/judge settings empty for now. `.env` was not
+  edited; `.env.example` keeps both endpoint/model/key values blank. Do not advance to
+  Phase 6 or imply that a real-model accuracy report exists.
+- Removed the standalone model-connectivity example and its unused CLI helper at the
+  user's request. Prefer one-ticket previews or one-case offline generation/calibration
+  to verify actual workflow behavior. No local inference runtime/model was installed,
+  started or selected while inspecting existing hardware/runtime availability.
+- No Phase 6 endpoints, UI, Docker, auth, approval/sending or real client data added.
