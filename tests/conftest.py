@@ -24,6 +24,8 @@ def isolated_mcp_environment(monkeypatch, tmp_path):
     """Tests never append to the user's audit file or enable writes via their .env."""
     monkeypatch.setenv("DISPATCH_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
     monkeypatch.setenv("DISPATCH_READ_ONLY", "true")
+    monkeypatch.setenv("DISPATCH_EMBEDDING_CACHE_PATH", str(tmp_path / "embeddings.json"))
+    monkeypatch.setenv("DISPATCH_MODEL_CACHE_PATH", str(tmp_path / "models"))
 
 
 @pytest.fixture

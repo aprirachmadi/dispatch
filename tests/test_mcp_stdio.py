@@ -92,6 +92,8 @@ def stdio_parameters(base_url, tmp_path, *, read_only=True):
             DISPATCH_PSA_BASE_URL=base_url,
             DISPATCH_READ_ONLY=str(read_only).lower(),
             DISPATCH_AUDIT_PATH=str(tmp_path / "audit.jsonl"),
+            DISPATCH_EMBEDDING_CACHE_PATH=str(tmp_path / "embeddings.json"),
+            DISPATCH_MODEL_CACHE_PATH=str(tmp_path / "models"),
         ),
     )
 
@@ -113,6 +115,8 @@ async def test_real_stdio_reads_all_traps_without_any_database_changes(
             "draft_reply",
             "add_internal_note",
             "update_ticket",
+            "find_similar_tickets",
+            "weekly_report",
         }
         all_tickets = await client.call_tool("search_tickets", {"limit": 100})
         assert not all_tickets.is_error

@@ -214,3 +214,80 @@
   start failure preventing execution, and completion failure after a committed write.
 - No demo reset/reseed or local write test was performed. The existing local database
   is retained; only temporary databases/journals were used for write verification.
+
+## Phase 4 — approved 2026-10-12
+
+### Step 1: local semantic similarity and bounded scans
+
+- Add FastEmbed CPU/ONNX inference (0.9.x, locked by Poetry), not PyTorch, a vector
+  database, an embedding API, or another agent framework. Declare Hugging Face Hub
+  directly because pinned snapshot download uses its API (already a FastEmbed dependency).
+- Model: `BAAI/bge-small-en-v1.5`, 384 dimensions, 512-token truncation. Pin its
+  quantized ONNX repository `Qdrant/bge-small-en-v1.5-onnx-Q` to immutable revision
+  `aa8f8b060edb00e03bfdd08813a2949946c8ba55`. Inference is local; only public model
+  artifacts are downloaded on first use, with no token or ticket text transmitted.
+- Embed exact subject + description only; never notes, draft replies, priority/category
+  labels, or instructions from ticket text. Long inputs are truncated by the model's
+  tokenizer at 512 tokens; this is similarity evidence, not full-ticket classification.
+- Cache normalized vectors by model/preprocessing identity and SHA-256 of exact text.
+  Store no plaintext in the cache; validate finite/nonzero vectors/dimensions, bound
+  entries/file size, and write via same-directory atomic replacement. Vector storage
+  is not anonymization; synthetic data only. No silent keyword fallback on model failure.
+- Historical matches must be resolved/closed, have a resolution timestamp strictly
+  before the source ticket's creation, and exclude the source ID. The user explicitly
+  chose chronological history to prevent future-data leakage in later evaluations.
+- Cosine scores are in [-1,1], not confidence percentages. Return at most ten matches,
+  tied by ascending ticket ID. Search across synthetic companies unless company_id
+  filters candidates; source ticket's company need not equal the candidate filter.
+- Fetch through TicketProvider/REST only. Cap complete scans at 2000 combined records;
+  use one-record lookahead, reject larger/unstable/invalid scans rather than returning
+  misleading partial results. Unknown company filters return an error, not zero counts.
+
+### Step 2: explicit UTC weekly calculations
+
+- Require an explicit ISO Monday date. Use [Monday 00:00 UTC, following Monday 00:00
+  UTC), not the technician's local timezone, and reject invalid/overflowing dates.
+- `opened` counts creation timestamps in the window; `resolved` counts recorded
+  resolution timestamps in the window, including tickets created before it. These
+  are current record fields, not a complete status-transition event history.
+- Category and priority breakdowns describe tickets opened in that window. Missing
+  category is `unclassified`, not a guessed enum. Include zero-valued breakdown keys.
+- Report current new/in-progress backlog separately, with an explicit as-of time.
+  Do not claim to reconstruct historical week-end backlog. Mark whether the requested
+  period has fully elapsed; current/future weeks may be incomplete in time.
+- No SLA compliance, first-response times, average response metrics, forecasts, or
+  AI-written narrative: those cannot be truthfully inferred from current models.
+
+### Step 3: MCP wiring and read-only semantics
+
+- Add `find_similar_tickets` and `weekly_report`, for eight total tools. Both have
+  precise typed/validated schemas, read-only annotations, bounded inputs and outputs,
+  and normal start/finish auditing, including failure paths. Audit allowlists ISO week
+  metadata without copying arbitrary date strings or returned report/ticket bodies.
+- Keep analytics above TicketProvider: no PSA ORM imports, direct SQL reads, or early
+  UI/report REST endpoints. Use the existing paginated REST reads only.
+- Configure separate trusted `DISPATCH_EMBEDDING_CACHE_PATH` and
+  `DISPATCH_MODEL_CACHE_PATH` paths. Loading/creating the MCP server does not download
+  a model. Reports and no-candidate similarity results also require no model download.
+- Read-only is a PSA mutation policy; audit, model download, and local vector cache
+  writes remain permitted, just like audit journaling in Phase 3. No agent, labeled
+  triage evals, UI, Docker, external embedding inference, or auto-sending is added.
+- Multi-page REST scans are not a transactional database snapshot. Ordering/duplicate
+  and filter checks detect some concurrent changes; do not promise historical record
+  versions or detection of every edit. The demo's bounded counts are observational.
+
+### Verification
+
+- All 294 pytest cases pass with real-model smoke tests explicitly enabled, without
+  warnings. Ruff lint/format, `poetry check --lock`, and whitespace checks pass.
+  The normal download-free suite skips the three opt-in real-model cases.
+- Downloaded and ran the pinned quantized ONNX snapshot: 384-dimensional vectors;
+  related synthetic printer text ranks above unrelated onboarding text. Public artifacts
+  use about 65 MiB on disk. No API key/token or ticket-text transmission was needed.
+- Real stdio analytics tests pass in both auto and legacy modes against a separate
+  seeded uvicorn process: chronological matches, historical printer #29 retrieval,
+  exact seed weekly counts, stable cache reuse, rejected invalid inputs, full redacted
+  audit pairs, and every PSA record unchanged.
+- All PSA/vector/audit verification paths were temporary. Only the approved public
+  model artifact cache was retained under ignored `data/models`; no demo reset/reseed,
+  classification changes, draft creation, agent, or UI work was performed.

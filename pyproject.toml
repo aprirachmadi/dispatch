@@ -13,6 +13,8 @@ dependencies = [
     "mcp (>=2.3,<3)",
     "httpx2 (>=2,<3)",
     "anyio (>=4,<5)",
+    "fastembed (>=0.9,<0.10)",
+    "huggingface-hub (>=1,<2)",
 ]
 
 [tool.poetry]

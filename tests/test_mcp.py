@@ -28,6 +28,8 @@ async def test_discovery_read_and_write_tools_with_precise_schemas(mcp_client):
         "draft_reply",
         "add_internal_note",
         "update_ticket",
+        "find_similar_tickets",
+        "weekly_report",
     }
     for tool in (tools[name] for name in ("search_tickets", "get_ticket", "get_company_context")):
         assert tool.annotations.read_only_hint is True

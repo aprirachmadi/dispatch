@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -17,7 +17,9 @@ from mcp.shared.exceptions import MCPError
 from dispatch.domain import TicketCategory, TicketPriority, TicketStatus
 from dispatch.mcp_server.state import ServerState
 
-READ_TOOLS = frozenset({"search_tickets", "get_ticket", "get_company_context"})
+READ_TOOLS = frozenset(
+    {"search_tickets", "get_ticket", "get_company_context", "find_similar_tickets", "weekly_report"}
+)
 WRITE_TOOLS = frozenset({"draft_reply", "add_internal_note", "update_ticket"})
 KNOWN_TOOLS = READ_TOOLS | WRITE_TOOLS
 
@@ -45,6 +47,15 @@ def summarize_arguments(arguments: Any) -> dict[str, Any]:
             summary[f"{name}_length"] = (
                 min(len(value), 100_000) if isinstance(value, str) else "invalid"
             )
+    if "week_start" in arguments:
+        value = arguments["week_start"]
+        try:
+            parsed = date.fromisoformat(value) if type(value) is str and len(value) == 10 else None
+            summary["week_start"] = (
+                value if parsed is not None and parsed.weekday() == 0 else "invalid"
+            )
+        except ValueError:
+            summary["week_start"] = "invalid"
     return summary
 
 

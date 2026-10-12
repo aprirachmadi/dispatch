@@ -31,7 +31,7 @@ async def writable_mcp(write_client, tmp_path):
 async def test_write_discovery_annotations_and_draft_status_schema(writable_mcp):
     connection, path = writable_mcp
     tools = {tool.name: tool for tool in (await connection.list_tools()).tools}
-    assert len(tools) == 6
+    assert len(tools) == 8
     for name in ("draft_reply", "add_internal_note", "update_ticket"):
         tool = tools[name]
         assert tool.annotations.read_only_hint is False

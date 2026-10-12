@@ -10,6 +10,8 @@ from dispatch.mcp_server.providers.base import TicketProvider
 
 if TYPE_CHECKING:
     from dispatch.mcp_server.audit import AuditLog
+    from dispatch.mcp_server.services.reports import ReportService
+    from dispatch.mcp_server.services.similarity import SimilarityService
 
 
 @dataclass(frozen=True)
@@ -17,3 +19,5 @@ class ServerState:
     provider: TicketProvider
     settings: MCPSettings
     audit: AuditLog
+    similarity: SimilarityService | None = None
+    reports: ReportService | None = None

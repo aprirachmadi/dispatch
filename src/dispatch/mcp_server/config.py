@@ -15,6 +15,8 @@ class MCPSettings:
     psa_base_url: str = "http://127.0.0.1:8000"
     read_only: bool = True
     audit_path: Path = Path("data/audit.jsonl")
+    embedding_cache_path: Path = Path("data/embeddings.json")
+    model_cache_path: Path = Path("data/models")
 
     def __post_init__(self) -> None:
         if type(self.read_only) is not bool:
@@ -47,4 +49,8 @@ def load_settings() -> MCPSettings:
         psa_base_url=os.getenv("DISPATCH_PSA_BASE_URL", MCPSettings().psa_base_url),
         read_only=parse_read_only(os.getenv("DISPATCH_READ_ONLY", "true")),
         audit_path=Path(os.getenv("DISPATCH_AUDIT_PATH", "data/audit.jsonl")),
+        embedding_cache_path=Path(
+            os.getenv("DISPATCH_EMBEDDING_CACHE_PATH", "data/embeddings.json")
+        ),
+        model_cache_path=Path(os.getenv("DISPATCH_MODEL_CACHE_PATH", "data/models")),
     )

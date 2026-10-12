@@ -1,8 +1,9 @@
 # Dispatch
 
 A synthetic NorthPoint IT helpdesk portfolio project. **Demo only:** no authentication,
-no real client data, and no production use. Phases 1–3 provide the mock PSA REST API,
-an MCP server with default-denied draft-only writes, and redacted audit logging.
+no real client data, and no production use. Phases 1–4 provide the mock PSA REST API,
+an MCP server with default-denied draft-only writes, redacted audit logging,
+local historical similarity, and UTC weekly reporting.
 Agents, evaluations, UI, approval/sending, and Docker are not implemented yet.
 
 ## Development setup
@@ -121,7 +122,7 @@ DISPATCH_DATABASE_URL=sqlite:///./data/demo-2.db poetry run uvicorn dispatch.moc
 - The official SDK v2 uses HTTPX2, also used by the REST adapter and installed
   Starlette TestClient. The earlier HTTPX deprecation warning is now resolved.
 
-## MCP server (Phases 2–3)
+## MCP server (Phases 2–4)
 
 Uses the **official `mcp` SDK v2**, locked by Poetry (initially 2.3.0), with its
 `MCPServer` class. This is the renamed v1 `FastMCP`, **not** the separate third-party
@@ -160,7 +161,9 @@ on your host). Using `.venv/bin/python` avoids dependence on the host's Poetry P
       "env": {
         "DISPATCH_PSA_BASE_URL": "http://127.0.0.1:8000",
         "DISPATCH_READ_ONLY": "true",
-        "DISPATCH_AUDIT_PATH": "/absolute/path/to/dispatch/data/audit.jsonl"
+        "DISPATCH_AUDIT_PATH": "/absolute/path/to/dispatch/data/audit.jsonl",
+        "DISPATCH_EMBEDDING_CACHE_PATH": "/absolute/path/to/dispatch/data/embeddings.json",
+        "DISPATCH_MODEL_CACHE_PATH": "/absolute/path/to/dispatch/data/models"
       }
     }
   }
@@ -178,6 +181,8 @@ if its working directory does not contain your `.env`.
 | `search_tickets` | Optional query/company/category/priority/status; limit 1–100 (default 25), offset 0–10,000. Returns `tickets`, `limit`, `offset`; no total count. |
 | `get_ticket` | Required positive `ticket_id`. Returns ticket fields and up to 100 internal notes, with `notes_truncated`. |
 | `get_company_context` | Required positive `company_id`. Returns company name/SLA and up to 100 contacts, with `contacts_truncated`. No invented infrastructure context. |
+| `find_similar_tickets` | Required `ticket_id`; optional limit 1–10 (default 5) and candidate company filter. Returns historical ticket summaries and cosine scores. |
+| `weekly_report` | Required ISO Monday `week_start`; optional company filter. Returns UTC weekly counts and a separate current-backlog snapshot. |
 
 IDs must be positive signed 64-bit integers, not strings or booleans. Enums match the
 REST values above. Text search is literal and excludes internal notes. Empty searches
@@ -191,8 +196,8 @@ Requests use the trusted configured URL, never a URL taken from ticket text/tool
 
 Read-only annotations and untrusted-text warnings describe behavior; they are **not**
 a complete prompt-injection defense. Phase 3 permits only the guarded mutations below;
-it exposes no approval, sending, AI sampling, or AI calls. Embeddings and weekly reports
-belong to Phase 4.
+it exposes no approval, sending, LLM sampling, or hosted AI API calls. Phase 4's local
+embedding inference is the only ML operation. No triage agent exists yet.
 
 ### Verify the MCP boundary
 
@@ -207,7 +212,7 @@ poetry run ruff format --check .
 poetry check --lock
 ```
 
-The stdio tests discover all six tools, read the three seed traps, check invalid/
+The stdio tests discover all eight tools, read the three seed traps, check invalid/
 unknown tools and backend unavailability, and verify **every persisted record** is
 unchanged in read-only mode. Write-mode tests verify only the intended mutations and
 that saved replies remain drafts. They never use or modify your local demo database.
@@ -216,7 +221,7 @@ that saved replies remain drafts. They never use or modify your local demo datab
 
 ### Default-deny mode
 
-`DISPATCH_READ_ONLY=true` is the default for both processes. All six MCP tools remain
+`DISPATCH_READ_ONLY=true` is the default for both processes. All eight MCP tools remain
 discoverable, but the three write tools are blocked before provider dispatch. The
 provider and backend additionally reject writes independently. Existing `POST /tickets`
 intake and append-only audit logging remain allowed. Read-only is an application policy,
@@ -306,6 +311,151 @@ poetry run pytest tests/test_mcp_stdio.py -v
 
 After write-mode exploration, restore `DISPATCH_READ_ONLY=true` and restart both
 processes. All tests use temporary data/audit paths, not your demo database or journal.
+
+## Phase 4: historical similarity and weekly reporting
+
+Both tools work with `DISPATCH_READ_ONLY=true` and produce normal audit pairs. They
+read only through `TicketProvider`/REST, never the PSA database directly. They do not
+create drafts, notes, classifications, approvals, external messages, or UI endpoints.
+
+### Local embeddings, not an embedding API
+
+FastEmbed 0.9.x runs `BAAI/bge-small-en-v1.5` on CPU through ONNX Runtime. Poetry locks
+the library versions; the model's quantized ONNX snapshot is pinned separately to
+`Qdrant/bge-small-en-v1.5-onnx-Q@aa8f8b060edb00e03bfdd08813a2949946c8ba55`.
+The model has 384 dimensions and truncates input at 512 tokens. Embed exact subject +
+description only; notes, drafts, labels, and resolutions are not added to the problem text.
+
+First similarity use downloads public artifacts (approximately 67 MB plus tokenizer
+files; runtime dependencies are additional). It requires network access **for the
+download**, no API key/token, and sends no ticket text. Later inference uses the local
+snapshot. Reports and searches with no eligible historical candidates never load it.
+Unavailable/corrupt model artifacts produce an error, not a hidden keyword fallback.
+
+Paths are trusted process configuration, relative to the MCP working directory:
+
+- `DISPATCH_MODEL_CACHE_PATH=./data/models` — pinned public artifacts.
+- `DISPATCH_EMBEDDING_CACHE_PATH=./data/embeddings.json` — normalized vector cache.
+
+Use absolute paths in an MCP host. The vector file contains model identity, SHA-256
+text hashes, and vectors, **not plaintext ticket text**. Hash/content/model changes
+invalidate cached vectors. Writes use atomic replacement; the cache is bounded to
+4096 entries and 64 MiB. Local caches may be written in read-only mode; PSA records
+may not. Vectors are not anonymization: all data must still be synthetic.
+
+To warm the pinned model before a short-timeout MCP client connects, run from repo root:
+
+```bash
+poetry run python - <<'PY'
+from dispatch.mcp_server.config import load_settings
+from dispatch.mcp_server.services.embeddings import FastEmbedder
+model = FastEmbedder(load_settings().model_cache_path)
+vectors = model.encode(["Synthetic model warm-up"])
+print(f"Ready: {model.identity}; dimensions={len(vectors[0])}")
+PY
+```
+
+A first cold call may take longer than a client's default timeout. Warm it first or
+use a longer client read timeout (the smoke test uses 180 seconds).
+
+### What `find_similar_tickets` returns
+
+Example arguments: `{"ticket_id":21,"limit":3}`. Candidates:
+
+- Are currently `resolved` or `closed`, with `resolved_at` strictly **before** the
+  source ticket's `created_at`. This prevents future-resolution leakage into triage.
+- Exclude the source ID. An optional `company_id` filters candidates only; without it,
+  matching spans the fictional clients. The source can belong to another company.
+- Rank by cosine similarity in **[-1,1]**, then ascending ticket ID for ties. Scores
+  are not probabilities, confidence percentages, guarantees, or classification labels.
+
+Returns `source_ticket_id`, `history_cutoff`, pinned `model` identity, `eligible_tickets`,
+and `matches` containing ticket summaries/scores. Use `get_ticket` on a matched ID for
+its resolution notes. No eligible candidates returns `matches: []`, not a fallback
+to new/in-progress tickets. The #21/#22 duplicate pair is still new, so #22 is not a
+historical match for #21; the real-model seed smoke check finds historical printer #29.
+
+Only 1–10 matches can be requested (default 5). The combined resolved/closed scan is
+capped at 2000 records **before** the time filter. Larger/unstable scans fail visibly;
+use a company filter rather than accepting misleading partial evidence.
+
+### What `weekly_report` means
+
+Example: `{"week_start":"2026-10-12"}`; optionally add `company_id`.
+
+- The required date must be an ISO calendar Monday. The window is inclusive Monday
+  00:00 **UTC**, exclusive next Monday 00:00 UTC—not Jakarta/local business time.
+- `opened`: tickets created in the window.
+- `resolved`: tickets with a recorded resolution timestamp in the window, including
+  tickets created earlier. This is not a full transition/reopening event history.
+- `opened_by_category`/`opened_by_priority`: breakdowns of the **opened** cohort;
+  missing category is `unclassified`, and zero-count keys are retained.
+- `current_backlog`: current new/in-progress counts with their own `as_of` timestamp,
+  **not** a reconstructed historical week-end backlog.
+- `period_complete`: whether the week has fully elapsed. A current/future week can
+  be incomplete in time even though every available record was scanned.
+
+The report scans at most 2000 total records, including older tickets needed for
+resolution/backlog calculations. Larger scans fail instead of silently truncating.
+REST pages are not a transactionally consistent snapshot: duplicate/order checks detect
+some concurrent changes, not every possible edit. Counts describe the observed records.
+Unknown company filters return errors, not empty fictional companies. No SLA compliance,
+first-response times, forecast, average response time, or AI narrative is fabricated.
+
+For a fresh seed and week `2026-10-12`: 18 opened, 0 resolved, 36 current backlog
+(24 new + 12 in progress). Your manual ticket additions/updates may change those counts.
+
+### Verify Phase 4
+
+Ordinary tests use injected deterministic embeddings and **never download models**:
+
+```bash
+poetry run pytest tests/test_embeddings.py tests/test_similarity.py tests/test_reports.py
+poetry run pytest tests/test_analytics_mcp.py
+poetry run pytest
+```
+
+Three real-model smoke cases are skipped by default. Explicitly enable them:
+
+```bash
+DISPATCH_TEST_REAL_MODEL=true poetry run pytest tests/test_real_analytics.py -v
+```
+
+They check related/unrelated synthetic text, real stdio similarity and reporting in
+auto/legacy modes, chronological candidates, deterministic cache reuse, complete audits,
+and **no PSA record changes**. They reuse public artifacts in `data/models` (override
+with `DISPATCH_TEST_MODEL_CACHE_PATH`), but all PSA/vector/audit paths remain temporary.
+These are smoke tests, not the labeled triage evaluation set reserved for Phase 5.
+
+With uvicorn running, you can manually call both tools without an AI service:
+
+```bash
+poetry run python - <<'PY'
+import asyncio, json, os, sys
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters
+
+async def main():
+    server = StdioServerParameters(
+        command=sys.executable, args=["-m", "dispatch.mcp_server.server"], env=os.environ.copy()
+    )
+    async with Client(server, read_timeout_seconds=180) as client:
+        for name, arguments in [
+            ("find_similar_tickets", {"ticket_id": 21, "limit": 3}),
+            ("weekly_report", {"week_start": "2026-10-12"}),
+            ("find_similar_tickets", {"ticket_id": 21, "limit": 11}),
+            ("weekly_report", {"week_start": "2026-10-13"}),
+        ]:
+            result = await client.call_tool(name, arguments)
+            print(name, "error=", result.is_error)
+            print(json.dumps(result.structured_content, indent=2) if not result.is_error
+                  else [item.text for item in result.content])
+asyncio.run(main())
+PY
+```
+
+The first two calls should succeed; limit 11 and a Tuesday date should fail. Each
+attempt adds a redacted audit pair. No PSA records are changed by these calls.
 
 Reference documentation: [Official MCP SDK](https://github.com/modelcontextprotocol/python-sdk),
 [v2 migration guide](https://py.sdk.modelcontextprotocol.io/migration/),
