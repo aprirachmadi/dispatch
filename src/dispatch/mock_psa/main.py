@@ -19,6 +19,7 @@ from dispatch.mock_psa.dependencies import (
     SearchQuery,
     require_write_mode,
 )
+from dispatch.mock_psa.frontend import ConsoleFiles, console_directory
 from dispatch.mock_psa.models import (
     Company,
     Contact,
@@ -41,6 +42,7 @@ from dispatch.mock_psa.schemas import (
     TicketResponse,
     TicketUpdate,
 )
+from dispatch.mock_psa.workbench_routes import router as workbench_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -221,6 +223,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return ticket
 
     app.include_router(console_router)
+    app.include_router(workbench_router)
+    app.mount("/console", ConsoleFiles(directory=console_directory(), html=True), name="console")
     return app
 
 

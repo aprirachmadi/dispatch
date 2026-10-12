@@ -520,3 +520,91 @@
   read checks passed against a separate temporary seeded FastAPI process; snapshots of
   all seven SQLite tables remained unchanged. Temporary records/reports/processes were
   cleaned up. `.env`, the demo database and the dependency lockfile were not changed.
+
+
+## Phase 7 — frontend planning requested 2026-10-13
+
+- User requested Impeccable planning and selected the full console, delegated stack
+  recommendation, and accepted the recommended code-first workflow. This opens UI
+  planning; earlier Phase 6/correction exclusions still describe those checkpoints.
+  It is not approval to implement the plan or start Docker/packaging work.
+- Recommend semantic HTML/CSS/native JavaScript modules served same-origin from the
+  existing FastAPI app at `/console/`. Keep Poetry and existing frameworks; no Node
+  build pipeline, separate frontend server, CDN assets, or new production dependency.
+  Record durable product context in `PRODUCT.md` and workflow in Impeccable config.
+- Full scope: ticket queue/detail and saved attention, exact-revision unsent draft
+  review, explicit preview/apply job monitoring, UTC weekly report, and separate audit
+  sources. Workflow-first delivery; design direction awaits user choice. Detailed
+  screen/API/state/verification brief: `docs/PHASE7_PLAN.md`.
+- Identify proposed additive technician reads for server read-only capability, queue
+  attention/draft summaries, and persisted run discovery. Existing endpoints alone
+  do not provide these bulk/recovery contracts. Preserve MCP tools/DTOs and existing
+  REST responses; no schema migration is proposed. These changes await brief approval.
+- Preserve preview versus saved-state distinction: Apply regenerates, not a promotion
+  of an earlier preview. Missing assessment means not assessed; approved means unsent.
+  Unknown mutation outcomes require inspection, never automated replay. Keep secrets
+  server-side and untrusted text literal. No browser eval dashboard or online judge.
+- Planning does not read/change `.env` or the demo database, start inference, add UI
+  source, install dependencies, or claim browser verification. Automated tests remain
+  isolated; deliberate manual demonstrations will use the retained migrated demo.
+
+### Real-model evidence received before UI planning
+
+- Supersedes the earlier pending-real-model statements, not their recorded historical
+  verification: user ran real Ollama `qwen3.5:4b` backend preview (9/9 operational
+  checks) and the full 40-case frozen-context no-judge evaluation with an explicit
+  `OPENAI_OUTPUT_MODE=json_schema` command override.
+- Report `data/evals-44c350b8-4e92-4859-8131-20ede829f2ef.json`: 40 valid assessments
+  and 40 drafts, 17/40 exact classifications; category 82.5%, priority 60%, urgency
+  87.5%, security flag 97.5%, urgent recall 5/9. Execution works; these findings do
+  not justify autonomous approval or safety claims. Draft grounding needs review.
+- Real judge calibration and real-model Apply remain unverified. Offline reports do
+  not update PSA records. Model settings are not changed by this planning task.
+
+
+## Phase 7 — technician console implemented (2026-10-13)
+
+- User selected Service case-file and approved code changes for the full console.
+  Implement HTML/CSS/native ES modules in `web/`, served same-origin at `/console/`
+  by the existing one-worker FastAPI process. Poetry remains the toolchain; no new
+  production framework, frontend server, CDN, authentication, sending, or Docker.
+- Ticket queue supports legacy filters plus saved-attention states and draft-review
+  summaries. Detail shows source/company/contact/notes beside assessment and response.
+  Missing assessment remains unknown. Ticket labels remain separate from the model's
+  saved labels; manual label/urgency/security overrides are not added to the UI.
+- Explicit edits and unsent approval use existing revision-checked REST writes. Keep
+  local text on conflicts, reconcile unknown outcomes through reads, and prevent
+  pending draft-page reads from erasing late editor input or racing another page.
+- Triage view defaults to Preview, confirms Apply scope, shows per-ticket results and
+  write journals, and recovers through persisted history. Apply regenerates rather
+  than promoting preview text; no cancellation or automatic mutation retry is added.
+  Weekly reports preserve UTC/window/backlog distinctions; audit sources stay separate.
+- Add three read-only contracts: `/console/config`, `/console/tickets`, and
+  `GET /triage/runs`. Preserve all existing REST/MCP shapes and eight tool permissions.
+  Queue attention filters apply before pagination; reject base scans beyond 2,000
+  tickets. Share latest-valid-of-100 marker validation between detail and queue,
+  including byte-bounded UTF-8 reads that preserve NUL/trailing-data rejection.
+- Serve only console assets with a restrictive CSP and safe literal DOM rendering.
+  No ticket/draft text or credentials in browser storage; no browser model/PSA endpoint
+  configuration. Refuse unsafe JavaScript integer IDs/revisions rather than rounding.
+  Wheel assets serve independently of cwd, without exposing repository/data files.
+- Add locked development-only Playwright and opt-in Chromium interaction tests using
+  a real isolated FastAPI process and deterministic replacement generator. These are
+  not real-model accuracy, judge calibration, or Ollama Apply verification.
+- User explicitly requested stopping the additional Impeccable workflow. Retain the
+  approved interface and tests; no further design-documentation or artifact gates.
+  `.env` and the retained demo database remain untouched. No automatic commit.
+
+### Phase 7 verification
+
+- Full suite with browser interaction checks enabled: **485 passed, 4 intentional
+  skips** (three opt-in real embeddings, one separately requested screenshot capture).
+  Browser suite with capture enabled: **16 passed**. No generative model calls were
+  used; all browser mutations targeted isolated synthetic databases.
+- Ruff lint/formatting, JavaScript syntax, frontend formatting, Poetry lock checks,
+  and whitespace checks pass. Poetry wheel builds with all ten UI assets; isolated
+  extracted-wheel serving outside the repository cwd was verified.
+- Desktop/phone checks cover all console areas, conflict and unknown-write recovery,
+  unsaved navigation, lost job-start response, polling disconnect/resume, read-only
+  mode, literal injection/HTML text, UTC reports, and delayed draft-page races.
+- No `.env` or demo-database edits, reset/reseed, Docker work, or automatic commit.

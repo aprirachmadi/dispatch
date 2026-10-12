@@ -1,23 +1,20 @@
 """Technician-only demo REST operations. No identity authentication or sending path."""
 
-import json
 from typing import Annotated, Literal
 from uuid import UUID
 
 import httpx2
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import ValidationError
 from sqlalchemy import select, update
 
-from dispatch.agent.workflow import NOTE_PREFIX
 from dispatch.mcp_server.providers.base import ProviderError
 from dispatch.mcp_server.providers.mock_psa import MockPSAProvider
 from dispatch.mcp_server.services.models import WeeklyReport, WeekStart
 from dispatch.mcp_server.services.reports import ReportService
+from dispatch.mock_psa.assessments import saved_assessments
 from dispatch.mock_psa.audit_reader import read_mcp_events
 from dispatch.mock_psa.console_schemas import (
     ApproveDraft,
-    CompletionMarker,
     EditDraft,
     ReviewDraft,
     RunResponse,
@@ -26,7 +23,7 @@ from dispatch.mock_psa.console_schemas import (
 )
 from dispatch.mock_psa.database import utc_now
 from dispatch.mock_psa.dependencies import DBSession, Limit, Offset, RecordID, require_write_mode
-from dispatch.mock_psa.models import BackendAudit, DraftReply, Note, Ticket, TriageRun
+from dispatch.mock_psa.models import BackendAudit, DraftReply, Ticket, TriageRun
 from dispatch.mock_psa.run_manager import run_response
 
 router = APIRouter()
@@ -117,35 +114,9 @@ def approve(ticket_id: RecordID, draft_id: RecordID, payload: ApproveDraft, sess
 def assessment(ticket_id: RecordID, session: DBSession):
     """Project latest valid completed agent note linked to this ticket's draft; else 404."""
     require_ticket(session, ticket_id)
-    notes = session.scalars(
-        select(Note)
-        .where(
-            Note.ticket_id == ticket_id,
-            Note.author_name == "Dispatch MCP",
-            Note.body.startswith(NOTE_PREFIX, autoescape=True),
-        )
-        .order_by(Note.id.desc())
-        .limit(100)
-    ).all()
-    for note in notes:
-        if len(note.body) > 10_000:
-            continue
-        try:
-            marker = CompletionMarker.model_validate(json.loads(note.body[len(NOTE_PREFIX) :]))
-        except (ValueError, ValidationError, RecursionError):
-            continue
-        draft = session.get(DraftReply, marker.draft_id)
-        if draft is None or draft.ticket_id != ticket_id:
-            continue
-        # Recompute the attention flag; never trust a stored model-chosen permission.
-        return SavedAssessment(
-            note_id=note.id,
-            draft_id=draft.id,
-            created_at=note.created_at,
-            assessment=marker.assessment,
-            requires_attention=marker.assessment.requires_attention,
-            history_ids=marker.history_ids,
-        )
+    saved = saved_assessments(session, [ticket_id]).get(ticket_id)
+    if saved is not None:
+        return saved
     raise HTTPException(404, "No valid saved assessment found in the latest 100 agent notes")
 
 

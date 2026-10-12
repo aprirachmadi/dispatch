@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from dispatch.agent.models import Assessment, TriageResult
+from dispatch.domain import TicketCategory, TicketPriority, TicketStatus
 from dispatch.mock_psa.schemas import Description, ORMResponse, PositiveID
 
 Revision = Annotated[int, Field(strict=True, ge=1, le=2**63 - 2)]
@@ -70,3 +71,46 @@ class RunResponse(BaseModel):
     finished_at: datetime | None
     message: str | None
     results: list[TriageResult]
+
+
+class QueueTicket(BaseModel):
+    id: int
+    company_id: int
+    company_name: str
+    subject: str
+    category: TicketCategory | None
+    priority: TicketPriority
+    status: TicketStatus
+    created_at: datetime
+    requires_attention: bool | None
+    assessment_draft_id: int | None
+    draft_count: int
+    approved_count: int
+
+
+class QueuePage(BaseModel):
+    tickets: list[QueueTicket]
+    total: int
+    limit: int
+    offset: int
+    next_offset: int | None
+
+
+class RunSummary(ORMResponse):
+    run_id: str = Field(validation_alias="id")
+    state: Literal["running", "completed", "incomplete", "failed", "interrupted"]
+    mode: Literal["preview", "apply"]
+    ticket_id: int | None
+    limit: int
+    model: str
+    prompt_version: str
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class RunPage(BaseModel):
+    runs: list[RunSummary]
+    limit: int
+    offset: int
+    next_offset: int | None
+    scan_truncated: bool

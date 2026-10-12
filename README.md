@@ -5,8 +5,13 @@ no real client data, and no production use. Phases 1–6 provide the mock PSA RE
 an MCP server with default-denied draft-only writes, redacted audit logging,
 local historical similarity, UTC weekly reporting, a configurable LLM triage workflow,
 offline classification/draft evaluations, and technician REST endpoints for draft review
-and background triage. Real LLM accuracy remains unmeasured until the evaluation is run.
-**Approval never sends a reply.** UI, sending, and Docker are not implemented yet.
+and background triage. Initial real-model evaluation has run; human review remains required.
+**Approval never sends a reply.** The technician console is available at `/console/`.
+Sending, authentication, public deployment, and Docker are not implemented.
+
+The Phase 7 console uses HTML/CSS/native JavaScript modules served by the existing
+FastAPI process: no Node build step, frontend server, or CDN. The approved scope and
+safety rules are in [docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md).
 
 ## Development setup
 
@@ -36,7 +41,7 @@ src/dispatch/evaluation/ # Offline scoring, optional DeepEval adapter and report
 evals/                  # Synthetic gold cases, rubric and judge calibration fixtures
 tests/                  # Isolated API/model/seed tests
 examples/               # Small editable synthetic probes and MCP client demos
-web/                    # Future technician UI placeholder
+web/                    # Same-origin technician console and native ES modules
 ```
 
 See [DECISIONS.md](DECISIONS.md) for scope and engineering trade-offs.
@@ -121,8 +126,8 @@ DISPATCH_DATABASE_URL=sqlite:///./data/demo-2.db poetry run uvicorn dispatch.moc
 
 - SLA tiers: Gold = 1h response, Silver = 4h, Bronze = next business day. No deadline
   calculations yet; business calendar rules are deferred.
-- Phase 1 itself adds no agent/evals; Phase 5 provides them separately. Authentication,
-  UI and Docker are still absent. Phase 6 adds unsent draft approval over REST.
+- Phase 1 itself adds no agent/evals; Phase 5 provides them separately. Authentication and
+  Docker remain absent. Phase 6 adds unsent draft approval; Phase 7 adds the console.
 - **Local demo only:** bind to loopback. Do not expose it publicly or store real data.
 - The official SDK v2 uses HTTPX2, also used by the REST adapter and installed
   Starlette TestClient. The earlier HTTPX deprecation warning is now resolved.
@@ -732,7 +737,7 @@ Three real-embedding tests remain opt-in as described above. DeepEval integratio
 skip when the optional group is not installed. No dedicated example-script tests are
 maintained; application entrypoints are tested and examples manually verified with
 isolated synthetic inputs. Phase 6 endpoints are
-described below. No UI, Docker, authentication, ticket closing/merging or sending exists.
+described below. No Docker, authentication, ticket closing/merging or sending exists.
 
 Reference documentation: [Official MCP SDK](https://github.com/modelcontextprotocol/python-sdk),
 [v2 migration guide](https://py.sdk.modelcontextprotocol.io/migration/),
@@ -744,7 +749,7 @@ Reference documentation: [Official MCP SDK](https://github.com/modelcontextproto
 [SQLite foreign-key support](https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#foreign-key-support).
 
 
-## Phase 6: technician REST endpoints (no web UI yet)
+## Phase 6: technician REST endpoints
 
 ### Upgrade your existing database first
 
@@ -909,3 +914,115 @@ poetry run ruff check .
 poetry run ruff format --check .
 poetry check --lock
 ```
+
+## Phase 7: technician console
+
+Use your **existing migrated synthetic demo database**. Do not reseed/reset or copy
+`.env.example` over your configured `.env`. Stop an older API before launching this
+version. One API worker, without reload, is required for background jobs.
+
+```bash
+poetry install
+# Safe first inspection; this process override does not edit .env:
+DISPATCH_READ_ONLY=true poetry run uvicorn dispatch.mock_psa.main:app \
+  --host 127.0.0.1 --port 8000 --workers 1
+```
+
+Open **<http://127.0.0.1:8000/console/>**. All four areas use the actual REST API:
+
+- **Tickets:** company/status/category/priority/text filters, saved attention, original
+  source/company/contact/notes, saved assessment and historical ticket links, and paged
+  draft review. No assessment means **Not assessed**, not “safe.” The queue defaults
+  to new tickets; All statuses includes retained historical and additional demo work.
+- **Triage runs:** default Preview, explicit single-ticket or new-queue scope, persisted
+  run history, real model/MCP workflow, and monitoring/recovery. Leaving the page or
+  pausing monitoring does not cancel the backend job. Inspect individual results,
+  including skips/partial/uncertain writes, rather than treating “completed” as quality.
+- **Weekly report:** Monday-based UTC window and optional company filter, opened and
+  resolved counts, category/priority breakdowns, and a separately timestamped current
+  backlog. A shortcut opens the fixed synthetic seed week; there are no invented SLAs,
+  trends, attention totals, or response-time calculations.
+- **Audit:** backend and MCP metadata in independent source pages with scan warnings.
+  No fabricated technician identity, merged order, or tamper-proof guarantee.
+
+For deliberate **Apply, draft editing, and approval**, stop the read-only API and
+restart explicitly in write mode, preserving the same database/model configuration:
+
+```bash
+DISPATCH_READ_ONLY=false poetry run uvicorn dispatch.mock_psa.main:app \
+  --host 127.0.0.1 --port 8000 --workers 1
+```
+
+The console reads write capability from the server; it cannot enable writes itself.
+Agent configuration stays in trusted `.env`/environment. If your configured model
+requires structured schema output (as the tested Ollama evaluation did), prefix that
+server launch with `OPENAI_OUTPUT_MODE=json_schema`; changing output mode for an
+offline evaluation command does not change a running API. Do not run CLI triage or
+another backend concurrently against the same database.
+
+### Review and persistence semantics
+
+1. Preview shows a transient generated assessment/draft in the run view. It does not
+   update ticket/draft/note records; job/audit metadata is still persisted.
+2. Apply **regenerates**, then writes through the existing guarded MCP workflow. It
+   does not promote or promise to save the exact text from an earlier preview.
+3. Open the resulting ticket and inspect the saved assessment and linked unsent draft.
+   Save draft edits explicitly; approval is disabled while there are unsaved edits.
+4. Approve exactly the saved reviewed revision. An approved draft becomes read-only
+   through the API and remains **unsent**. There is no send or ticket-close control.
+
+On a revision conflict, local editor text is kept beside the latest saved revision.
+Choose the saved text or explicitly rebase/review your local text before another
+Save; no automatic overwrite/merge/approval occurs. On a write timeout, the outcome
+is unknown: read saved state before a deliberate next action. A lost start response
+is reconciled using persisted run history, never an automatic second POST.
+
+Ticket category/priority and saved model labels can differ after an external manual
+label edit. The UI shows source ticket fields separately from the saved assessment;
+this phase provides no manual urgency/security override or model retraining. Human
+review is still essential. The offline evaluation remains a separate pipeline and
+never populates the technician queue or dashboard by itself.
+
+### Additive console read contracts
+
+Existing REST/MCP shapes and tools remain unchanged:
+
+| Endpoint | Added behavior |
+| --- | --- |
+| `GET /console/config` | Public `read_only` boolean only; no secrets, endpoints, paths, or model-liveness claim |
+| `GET /console/tickets` | Queue envelope: `tickets`, truthful matching `total`, `limit`, `offset`, `next_offset`; company summary, nullable saved attention, linked draft ID, draft/approved counts |
+| `GET /triage/runs` | Newest-first paged summaries without generated bodies; use the existing by-ID endpoint for results |
+
+Queue filters mirror `/tickets` plus `attention=required|not_flagged|not_assessed`.
+Saved attention is filtered **before pagination**, using the same latest-valid-of-100
+completion-marker projection as ticket assessment detail. A bounded scan exceeding
+2,000 base-filtered tickets fails with 503; narrow filters rather than interpreting a
+partial count as a total. Run/audit pagination warns when its 10,000-offset limit
+prevents further scanning. Large IDs/revisions beyond JavaScript safe-integer precision
+are rejected in the browser instead of risking a mutation against a rounded identifier.
+
+Only the console asset directory is served. Local scripts/styles, literal text nodes,
+no browser storage of ticket/draft bodies, same-origin requests, and a restrictive
+console CSP keep untrusted content separate from executable UI. This does **not**
+add authentication or make a public deployment safe. Keep loopback and synthetic data.
+
+### Frontend verification
+
+Playwright is development-only and locked through Poetry. Chromium installation is
+needed only for the opt-in browser suite, not for running the console:
+
+```bash
+poetry run python -m playwright install chromium
+DISPATCH_RUN_BROWSER_TESTS=1 poetry run pytest tests/test_console_browser.py
+poetry run pytest
+poetry run ruff check .
+poetry run ruff format --check .
+poetry check --lock
+```
+
+Browser tests use an isolated seeded SQLite database, a real local FastAPI process,
+and a deterministic replacement generator—never your retained demo, Ollama, or real
+client data. They verify application/interaction behavior, not model quality, real
+judge calibration, or actual-model Apply. Screenshots can be requested separately
+with `DISPATCH_BROWSER_CAPTURE_PATH=.impeccable/review`; they are local review artifacts.
+Assets are included in Poetry wheels and served independently of the launch directory.

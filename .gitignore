@@ -13,3 +13,5 @@ data/
 *.db-shm
 *.db-wal
 *.backup-*.sqlite3
+.impeccable/questions/
+.impeccable/review/
