@@ -32,6 +32,7 @@ src/dispatch/mcp_server/ # Official SDK v2 server, providers/, tools/
 src/dispatch/agent/      # Future CLI agent placeholder
 evals/                  # Future labeled datasets/evaluation assets
 tests/                  # Isolated API/model/seed tests
+examples/               # Runnable manual checks; real processes, no pasted Python blocks
 web/                    # Future technician UI placeholder
 ```
 
@@ -135,6 +136,52 @@ the same interface without changing the tools. No ConnectWise/Jira adapter exist
 
 ### Run and connect
 
+For manual checks, use the scripts in `examples/` below. **Do not start MCP separately:**
+each client script launches its own MCP child process and stops it automatically on exit.
+MCP is not an AI model, chat UI, or REST endpoint. These clients call its tools without
+an AI API/key. In this project, MCP uses **stdio**: messages pass between local programs
+through their input/output streams rather than an HTTP port.
+
+#### List tools (one terminal, no backend needed)
+
+From the repository root:
+
+```bash
+poetry run python examples/mcp_list_tools.py
+```
+
+Expect `Available tools: 8`, followed by the eight tool names. No model is downloaded.
+Discovery lists the write tools too, but all example clients force read-only mode.
+
+#### Make real tool calls (two terminals)
+
+**Terminal 1:** start FastAPI and leave it running. If it is already running on port
+8000, keep that process; do not start a second copy. The database must already be seeded
+(see the seed instructions above; do not reset/reseed an existing demo database).
+
+```bash
+poetry run uvicorn dispatch.mock_psa.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+**Terminal 2:** run this script from the repository root:
+
+```bash
+poetry run python examples/mcp_smoke.py --base-url http://127.0.0.1:8000
+```
+
+It calls `search_tickets`, reads seeded ticket #21, and deliberately requests an invalid
+limit. Expect **`3/3 checks passed.`** The invalid-limit error is an **expected rejection**,
+so it counts as a passing safety check. No PSA records are modified; tool calls append
+to the configured audit journal. Unexpected tool errors produce `FAIL` and exit code 1;
+connection/startup failures also exit nonzero. Log messages may appear alongside results.
+
+Use `--ticket-id 31` to read another existing ticket, or change `--base-url` if your API
+uses a different port. `--help` lists the options. To test changed MCP code, simply
+**rerun the script**: it starts a fresh MCP process each time. After testing, stop
+FastAPI in Terminal 1 with Ctrl+C. No MCP process needs to be left running.
+
+#### Connecting an external MCP application (optional)
+
 First start the seeded API as above. Existing Phase 1 databases remain compatible:
 do not reseed them. The MCP adapter defaults to `http://127.0.0.1:8000`; optionally
 set `DISPATCH_PSA_BASE_URL` in `.env` or the process environment.
@@ -147,7 +194,8 @@ poetry run python -m dispatch.mcp_server.server
 This is a **stdio** server, not an HTTP endpoint or a chat UI. It waits for MCP
 JSON-RPC input; a blank terminal is normal. An MCP host normally launches this command
 as a child process. Stdout is reserved for protocol messages; logs go to stderr.
-No API key or AI service is required.
+No API key or AI service is required. Running this command alone does not test a tool;
+use the example clients above instead. Stop a manually started server with Ctrl+C.
 
 Example host configuration (replace both absolute paths; config file location depends
 on your host). Using `.venv/bin/python` avoids dependence on the host's Poetry PATH:
@@ -343,20 +391,9 @@ invalidate cached vectors. Writes use atomic replacement; the cache is bounded t
 4096 entries and 64 MiB. Local caches may be written in read-only mode; PSA records
 may not. Vectors are not anonymization: all data must still be synthetic.
 
-To warm the pinned model before a short-timeout MCP client connects, run from repo root:
-
-```bash
-poetry run python - <<'PY'
-from dispatch.mcp_server.config import load_settings
-from dispatch.mcp_server.services.embeddings import FastEmbedder
-model = FastEmbedder(load_settings().model_cache_path)
-vectors = model.encode(["Synthetic model warm-up"])
-print(f"Ready: {model.identity}; dimensions={len(vectors[0])}")
-PY
-```
-
-A first cold call may take longer than a client's default timeout. Warm it first or
-use a longer client read timeout (the smoke test uses 180 seconds).
+A first cold call may take longer than a client's default timeout. The
+`examples/mcp_smoke.py --analytics` client allows 180 seconds per read and loads/downloads
+the model on its first similarity call; no separate warm-up script is needed.
 
 ### What `find_similar_tickets` returns
 
@@ -427,35 +464,22 @@ and **no PSA record changes**. They reuse public artifacts in `data/models` (ove
 with `DISPATCH_TEST_MODEL_CACHE_PATH`), but all PSA/vector/audit paths remain temporary.
 These are smoke tests, not the labeled triage evaluation set reserved for Phase 5.
 
-With uvicorn running, you can manually call both tools without an AI service:
+With FastAPI still running in Terminal 1, manually test both tools in Terminal 2:
 
 ```bash
-poetry run python - <<'PY'
-import asyncio, json, os, sys
-from mcp import Client
-from mcp.client.stdio import StdioServerParameters
-
-async def main():
-    server = StdioServerParameters(
-        command=sys.executable, args=["-m", "dispatch.mcp_server.server"], env=os.environ.copy()
-    )
-    async with Client(server, read_timeout_seconds=180) as client:
-        for name, arguments in [
-            ("find_similar_tickets", {"ticket_id": 21, "limit": 3}),
-            ("weekly_report", {"week_start": "2026-10-12"}),
-            ("find_similar_tickets", {"ticket_id": 21, "limit": 11}),
-            ("weekly_report", {"week_start": "2026-10-13"}),
-        ]:
-            result = await client.call_tool(name, arguments)
-            print(name, "error=", result.is_error)
-            print(json.dumps(result.structured_content, indent=2) if not result.is_error
-                  else [item.text for item in result.content])
-asyncio.run(main())
-PY
+poetry run python examples/mcp_smoke.py --base-url http://127.0.0.1:8000 --analytics
 ```
 
-The first two calls should succeed; limit 11 and a Tuesday date should fail. Each
-attempt adds a redacted audit pair. No PSA records are changed by these calls.
+Expect **`7/7 checks passed.`** This includes the three basic checks, real historical
+similarity and weekly reporting, plus expected rejections of limit 11 and a Tuesday.
+The first similarity call may download the public model; no ticket text goes to an
+embedding API. Each attempt adds a redacted audit pair; local model/vector caches may
+be written. No PSA records are changed. The default report Monday is `2026-10-12` to
+match the fixed seed; use `--week-start YYYY-MM-DD` for another Monday.
+
+These are repeatable manual integration checks, not the future agent or labeled evals.
+Going forward, any user-run Python test/demo workflow belongs in `examples/`, with its
+prerequisites, exact Poetry command, expected output, and side effects documented here.
 
 Reference documentation: [Official MCP SDK](https://github.com/modelcontextprotocol/python-sdk),
 [v2 migration guide](https://py.sdk.modelcontextprotocol.io/migration/),

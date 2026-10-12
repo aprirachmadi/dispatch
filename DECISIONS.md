@@ -291,3 +291,27 @@
 - All PSA/vector/audit verification paths were temporary. Only the approved public
   model artifact cache was retained under ignored `data/models`; no demo reset/reseed,
   classification changes, draft creation, agent, or UI work was performed.
+
+## Runnable examples convention — approved 2026-10-12
+
+- Store user-run Python integration checks and demos in root `examples/`, not README
+  heredocs or pytest-only instructions. Apply the convention to future approved agent,
+  routing, and evaluation workflows when those phases exist; do not implement them now.
+- Keep only tool discovery and read-only MCP smoke scripts, with opt-in real analytics.
+  Each client includes its small stdio launch configuration and forces read-only mode
+  even if `.env` enables writes. No shared launcher or separate warm-up script: use
+  `poetry run python -m dispatch.mcp_server.server` when explicitly starting the server.
+- Discovery needs no backend. Actual calls require a separately running seeded FastAPI
+  backend. Model inference/download is explicit via `--analytics`;
+  ordinary discovery/read checks never download artifacts. No AI service/key is involved.
+- Use existing configured audit/cache paths; explain those local side effects. Do not
+  mutate/reset/reseed PSA data. Smoke checks distinguish expected validation rejections
+  from unexpected failures and exit nonzero on failure for repeatable command-line use.
+- Document which terminal holds FastAPI, automatic MCP lifecycle, expected output, and
+  rerun commands instead of ambiguous instructions to “restart MCP.” Examples are manual
+  checks, not application modules; per user preference, do not maintain dedicated pytest
+  tests for them. Verify them manually with isolated backend/audit/vector data instead.
+- Verification: all 294 application tests pass with real-model checks enabled; lint,
+  formatting, lockfile, and whitespace checks pass. Manually ran the remaining examples:
+  eight tools discovered without a backend, 3/3 basic checks and 7/7 analytics checks
+  passed against a temporary seeded API, and a full SQL snapshot remained unchanged.
