@@ -14,6 +14,12 @@ from dispatch.mock_psa.models import Company, Contact, Note, SLATier, Ticket, Ti
 
 
 @pytest.fixture
+def anyio_backend():
+    # Async clients and MCP subprocess tests use asyncio; no Trio dependency needed.
+    return "asyncio"
+
+
+@pytest.fixture
 def engine(tmp_path) -> Iterator[Engine]:
     engine = create_db_engine(f"sqlite:///{tmp_path / 'test.db'}")
     create_schema(engine)

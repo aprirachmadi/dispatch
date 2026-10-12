@@ -10,6 +10,8 @@ dependencies = [
     "sqlalchemy>=2.0,<3.0",
     "uvicorn>=0.30,<1.0",
     "python-dotenv>=1.0,<2.0",
+    "mcp (>=2.3,<3)",
+    "httpx2 (>=2,<3)",
 ]
 
 [tool.poetry]
@@ -17,7 +19,6 @@ packages = [{ include = "dispatch", from = "src" }]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0,<10.0"
-httpx = ">=0.27,<1.0"
 ruff = ">=0.9,<1.0"
 
 [build-system]

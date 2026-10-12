@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from dispatch.mock_psa.models import SLATier, TicketCategory, TicketPriority, TicketStatus
 
-PositiveID = Annotated[int, Field(strict=True, gt=0)]
+PositiveID = Annotated[int, Field(strict=True, gt=0, le=2**63 - 1)]
 Subject = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 Description = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=10_000)

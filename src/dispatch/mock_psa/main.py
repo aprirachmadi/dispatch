@@ -1,16 +1,23 @@
-"""Phase 1 REST API. No authentication: bind to loopback for this synthetic demo."""
+"""Mock PSA REST API. No authentication: bind to loopback for this synthetic demo."""
 
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from dispatch.mock_psa.config import Settings, load_settings
 from dispatch.mock_psa.database import create_db_engine, create_schema
-from dispatch.mock_psa.models import Company, Contact, Ticket, TicketCategory, TicketStatus
+from dispatch.mock_psa.models import (
+    Company,
+    Contact,
+    Ticket,
+    TicketCategory,
+    TicketPriority,
+    TicketStatus,
+)
 from dispatch.mock_psa.schemas import (
     CompanyResponse,
     ContactResponse,
@@ -21,8 +28,9 @@ from dispatch.mock_psa.schemas import (
 
 Limit = Annotated[int, Query(ge=1, le=100, description="Maximum records, from 1 to 100.")]
 Offset = Annotated[int, Query(ge=0, le=10_000, description="Records to skip, from 0 to 10000.")]
-RecordID = Annotated[int, Path(gt=0)]
-CompanyFilter = Annotated[int | None, Query(gt=0)]
+RecordID = Annotated[int, Path(gt=0, le=2**63 - 1)]
+CompanyFilter = Annotated[int | None, Query(gt=0, le=2**63 - 1)]
+SearchQuery = Annotated[str | None, Query(min_length=1, max_length=200)]
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -79,24 +87,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             query = query.where(Contact.company_id == company_id)
         return session.scalars(query.limit(limit).offset(offset)).all()
 
+    @app.get("/companies/{company_id}", response_model=CompanyResponse)
+    def get_company(company_id: RecordID, session: DBSession):
+        """Read one company and its SLA tier; return 404 for an unknown ID."""
+        company = session.get(Company, company_id)
+        if company is None:
+            raise HTTPException(status_code=404, detail="Company not found")
+        return company
+
     @app.get("/tickets", response_model=list[TicketResponse])
     def list_tickets(
         session: DBSession,
+        query: SearchQuery = None,
         company_id: CompanyFilter = None,
         category: TicketCategory | None = None,
+        priority: TicketPriority | None = None,
         status: TicketStatus | None = None,
         limit: Limit = 100,
         offset: Offset = 0,
     ):
-        """List tickets in stable ID order with optional company/category/status filters."""
-        query = select(Ticket).order_by(Ticket.id)
+        """Filter before pagination; text search is a literal case-insensitive substring."""
+        statement = select(Ticket).order_by(Ticket.id)
+        if query is not None:
+            text = query.strip()
+            if not text:
+                raise HTTPException(status_code=422, detail="Search query must not be blank")
+            statement = statement.where(
+                or_(
+                    Ticket.subject.icontains(text, autoescape=True),
+                    Ticket.description.icontains(text, autoescape=True),
+                )
+            )
         if company_id is not None:
-            query = query.where(Ticket.company_id == company_id)
+            statement = statement.where(Ticket.company_id == company_id)
         if category is not None:
-            query = query.where(Ticket.category == category)
+            statement = statement.where(Ticket.category == category)
+        if priority is not None:
+            statement = statement.where(Ticket.priority == priority)
         if status is not None:
-            query = query.where(Ticket.status == status)
-        return session.scalars(query.limit(limit).offset(offset)).all()
+            statement = statement.where(Ticket.status == status)
+        return session.scalars(statement.limit(limit).offset(offset)).all()
 
     @app.get("/tickets/{ticket_id}", response_model=TicketDetail)
     def get_ticket(ticket_id: RecordID, session: DBSession):

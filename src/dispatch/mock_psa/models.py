@@ -7,36 +7,11 @@ from sqlalchemy import Enum as SQLAlchemyEnum
 from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from dispatch.domain import SLATier as SLATier
+from dispatch.domain import TicketCategory as TicketCategory
+from dispatch.domain import TicketPriority as TicketPriority
+from dispatch.domain import TicketStatus as TicketStatus
 from dispatch.mock_psa.database import Base, UTCDateTime, utc_now
-
-
-class SLATier(StrEnum):
-    GOLD = "gold"
-    SILVER = "silver"
-    BRONZE = "bronze"
-
-
-class TicketCategory(StrEnum):
-    EMAIL = "email"
-    NETWORK = "network"
-    HARDWARE = "hardware"
-    SECURITY = "security"
-    ONBOARDING = "onboarding"
-    ALERTS = "alerts"
-
-
-class TicketPriority(StrEnum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    URGENT = "urgent"
-
-
-class TicketStatus(StrEnum):
-    NEW = "new"
-    IN_PROGRESS = "in_progress"
-    RESOLVED = "resolved"
-    CLOSED = "closed"
 
 
 def enum_column(enum: type[StrEnum]) -> SQLAlchemyEnum:
