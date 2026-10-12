@@ -2,22 +2,19 @@
 
 import argparse
 import asyncio
-import os
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from mcp import Client
-from mcp.client.stdio import StdioServerParameters
 from mcp.shared.exceptions import MCPError
 from pydantic import ValidationError
 
 from dispatch.agent.config import load_model_settings
-from dispatch.agent.llm import LLMError, OpenAICompatibleClient
+from dispatch.agent.llm import LLMError
 from dispatch.agent.prompts import PROMPT_VERSION
 from dispatch.agent.reporting import RunFile
-from dispatch.agent.workflow import MCPGateway, WorkflowError, run_batch
+from dispatch.agent.service import run_connected
+from dispatch.agent.workflow import WorkflowError
 from dispatch.mcp_server.config import load_settings
 
 
@@ -95,29 +92,15 @@ async def _triage(arguments) -> int:
         payload["results"] = list(records.values())
         report.write(payload)
 
-    environment = {
-        **os.environ,
-        "DISPATCH_READ_ONLY": "false" if arguments.apply else "true",
-        "DISPATCH_PSA_BASE_URL": mcp_settings.psa_base_url,
-    }
-    parameters = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "dispatch.mcp_server.server"],
-        env=environment,
-    )
     try:
-        async with (
-            OpenAICompatibleClient(model_settings) as model,
-            Client(parameters, read_timeout_seconds=180) as client,
-        ):
-            results = await run_batch(
-                MCPGateway(client, writes_allowed=arguments.apply),
-                model,
-                limit=arguments.limit,
-                ticket_id=arguments.ticket_id,
-                apply=arguments.apply,
-                progress=progress,
-            )
+        results = await run_connected(
+            model_settings,
+            mcp_settings,
+            apply=arguments.apply,
+            limit=arguments.limit,
+            ticket_id=arguments.ticket_id,
+            progress=progress,
+        )
         for result in results:
             print(f"\nTicket #{result.ticket_id}: {result.state}")
             if result.assessment:
@@ -136,3 +119,7 @@ async def _triage(arguments) -> int:
             payload["state"] = "interrupted_or_failed"
         payload["finished_at"] = datetime.now(UTC).isoformat()
         report.write(payload)
+
+
+if __name__ == "__main__":
+    triage_main()

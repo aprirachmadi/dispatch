@@ -79,6 +79,8 @@ class OpenAICompatibleClient:
         if len(system) + len(user) > MAX_PROMPT_CHARACTERS:
             raise LLMError("Model input exceeded the configured application limit.")
         options = {self.settings.token_parameter: self.settings.max_tokens}
+        if self.settings.reasoning_effort is not None:
+            options["reasoning_effort"] = self.settings.reasoning_effort
         if self.settings.output_mode == "json_object":
             options["response_format"] = {"type": "json_object"}
         elif self.settings.output_mode == "json_schema":

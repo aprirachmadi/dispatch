@@ -17,6 +17,8 @@ def test_schema_contains_current_phase_tables(engine):
         "tickets",
         "notes",
         "draft_replies",
+        "backend_audit",
+        "triage_runs",
     }
 
 

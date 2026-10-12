@@ -407,10 +407,116 @@
   claim has been made. Real connectivity, triage, judge calibration and the 40-case
   accuracy report remain the explicit user-configured verification step.
 - User explicitly requested leaving model/judge settings empty for now. `.env` was not
-  edited; `.env.example` keeps both endpoint/model/key values blank. Do not advance to
-  Phase 6 or imply that a real-model accuracy report exists.
+  edited; `.env.example` keeps both endpoint/model/key values blank. This was the Phase 5
+  checkpoint; the user subsequently approved Phase 6 while real LLM verification remains
+  pending. Do not imply that a real-model accuracy report exists.
 - Removed the standalone model-connectivity example and its unused CLI helper at the
   user's request. Prefer one-ticket previews or one-case offline generation/calibration
   to verify actual workflow behavior. No local inference runtime/model was installed,
   started or selected while inspecting existing hardware/runtime availability.
 - No Phase 6 endpoints, UI, Docker, auth, approval/sending or real client data added.
+
+
+## Phase 6 — approved technician backend (2026-10-12)
+
+- User approved this phase with local Ollama planned, while real LLM/eval results remain
+  pending. Implement only backend endpoints; no Phase 7 UI, Docker, auth framework,
+  real data, message sending, online judge or retry gate. `.env` remains untouched.
+- Keep all existing ticket and MCP-facing draft creation shapes/tool permissions intact.
+  Separate review DTOs expose revision/updated/approval fields through technician REST.
+  Agent composition is shared by CLI and backend; its gateway still cannot approve/edit.
+- Explicit SQLite version 6 via `PRAGMA user_version`; no Alembic dependency. Fresh
+  schemas initialize normally. Existing unversioned schemas must upgrade explicitly,
+  with all Dispatch processes stopped. Unknown/future shapes fail closed; no silent
+  rebuild/reset/reseed. SQLite backup API writes a private unique sibling backup before
+  transactional DDL, preserving WAL-committed data. Tests verify IDs/text/timestamps,
+  foreign keys, approval constraints, repeated upgrade and rollback of corrupt data.
+- Draft edits/approvals use an atomic conditional UPDATE on ticket ID, draft status and
+  reviewed revision. Both transitions increment revision; stale/repeat requests get
+  409. Approved drafts are immutable through the API, never sent. Successful mutation
+  and metadata-only audit insertion share one SQLite transaction; audit failure rolls
+  back the change. No claim of identity/authentication or protection from direct DB edits.
+- Read assessment from the latest valid completed agent note linked to a draft belonging
+  to the ticket, scanning at most 100 matching notes. Validate bounded fields and derive
+  the attention flag again in code. Saved notes are not authenticated classification proof.
+- Background jobs return 202 with persisted state and results. Default preview, explicit
+  write-enabled apply, bounded batch, model config loaded only on job request. Reuse
+  the same real MCP/LLM workflow as CLI, no extra orchestration framework. Journal each
+  write intent/confirmation; partial/uncertain outcomes remain visible. Never replay or
+  automatically retry writes. No API payload can select credentials/endpoints/files.
+- One active job per database enforced by a unique nullable slot; one API worker/process
+  is supported. Startup marks abandoned journals interrupted, shutdown cancels the owned
+  task. CLI/another backend against the same DB concurrently remain unsupported. Job
+  and audit metadata are exempt from ticket read-only mode, like the MCP audit journal.
+- Audit endpoint pages backend SQLite and MCP JSONL separately with explicit source
+  labels; no invented total merged ordering. Preserve original MCP journal and redact
+  again on reading. Bounded MCP scans report malformed/truncated records and ignore a
+  partial tail. Successful technician/job lifecycle events only; not a REST request log
+  or tamper-proof audit. Reports reuse existing service/REST provider in-process, avoiding
+  duplicate arithmetic and self-network port configuration for deterministic reads.
+- Optional agent/judge REASONING_EFFORT env setting, blank by default, forwarded only
+  when explicit. `none` is useful for supported Ollama thinking models; compatibility
+  remains model/runtime-dependent. No automatic model selection/fallback/download.
+- Add only `examples/console_api_smoke.py` for real read/review/background-job checks,
+  with explicit mutation options, retained synthetic IDs and failure exit codes. Keep
+  server startup as a module command and application tests in tests/, not example tests.
+
+
+### Phase 6 verification
+
+- All 422 application tests pass with optional eval dependencies and real embedding
+  checks enabled (no real generative model calls). Ruff, formatting, Poetry lockfile
+  and whitespace checks pass. Tests include simultaneous approval (one success/one
+  conflict), audit rollback, active-slot constraints, failed reporting redaction,
+  restart/shutdown recovery, unsupported schemas and unchanged MCP DTOs/permissions.
+- Manually verified separate temporary FastAPI + real MCP processes with a local
+  Chat Completions protocol stand-in: console reads 7/7, retained synthetic review
+  14/14, background preview/apply 9/9 each, 8-tool discovery and MCP analytics 7/7.
+  Preview preserved all PSA records; apply stored one status-draft reply and a valid
+  assessment while the ticket remained new. Shared CLI preview also passed. Temporary
+  databases/journals/run reports were discarded; no user database or `.env` was edited.
+- Migration CLI verified on a temporary legacy DB: upgrade with backup, then repeat
+  no-op. Tests snapshot all seven current SQLite tables at the MCP read-only boundary.
+- Real Ollama triage, real judge calibration and 40-case model-quality/accuracy remain
+  pending user configuration/testing. The protocol stand-in is not a quality result.
+  No Phase 7 UI or Phase 8 packaging/architecture work was started.
+
+
+## Examples/application CLI correction — approved 2026-10-13
+
+- Supersedes the earlier convention where general-purpose runners/checkers lived in
+  examples. Preserve all three filenames, but use small editable synthetic constants
+  and direct public application calls; no CLI forwarding or broad argument parsers.
+- `run_triage.py` shows classification and drafting, expected labels and intermediate
+  assessment/history. Explicitly an LLM-stage demonstration, not live MCP retrieval,
+  queue processing or persistence. Optional expected-label assertion is a regression
+  aid, not an accuracy guarantee; labels never enter generation prompts.
+- `run_evals.py` shows one labeled frozen case, expected/generated fields, deterministic
+  classification scores, completion and separate optional judge scores/reasons/coverage.
+  No blended quality/accuracy score, PSA access or report file. Real judge thresholds
+  and model accuracy remain unmeasured; one-case macro-F1 includes absent classes.
+- `console_api_smoke.py` is a focused read-only synthetic ticket/draft/assessment REST
+  inspection with visible requests/results, not a multi-mode operational sweep.
+- Move the existing operational read/review/background-job checker into the application
+  as `python -m dispatch.mock_psa.checks`. Enable existing full-workflow and dataset CLIs
+  as `python -m dispatch.agent.cli` and `python -m dispatch.evaluation.cli`. Document
+  operational commands separately from examples; retain explicit write opt-ins,
+  read-only preview, no retries, unsent approval and separate judge configuration.
+- Test application entrypoints, not example scripts. No dependencies/frameworks, MCP
+  contract/security changes, Phase 7/UI or Docker work. Preserve existing Phase 6 work;
+  do not edit `.env` or the user's demo database. No automatic commit.
+
+
+### Correction verification
+
+- Default Poetry pytest run: **446 passed, 3 opt-in real-embedding tests skipped**,
+  including 27 new application-entrypoint cases. No dedicated example-script tests.
+  Ruff lint, formatting check, `poetry check --lock` and `git diff --check` pass.
+- Manually ran the LLM-stage probe, one-case judged/unjudged probes, operational read
+  checker, dataset subset and six-fixture calibration modules using a temporary local
+  Chat Completions protocol stand-in. This verifies execution, not real model accuracy
+  or judge calibration. No external LLM request or selected inference runtime/model.
+- Focused REST example (only its URL constant changed in a temporary copy) and module
+  read checks passed against a separate temporary seeded FastAPI process; snapshots of
+  all seven SQLite tables remained unchanged. Temporary records/reports/processes were
+  cleaned up. `.env`, the demo database and the dependency lockfile were not changed.

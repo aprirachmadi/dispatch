@@ -1,15 +1,24 @@
 """Mock PSA REST API. No authentication: bind to loopback for this synthetic demo."""
 
-from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
+from dispatch.mcp_server.config import load_settings as load_mcp_settings
 from dispatch.mock_psa.config import Settings, load_settings
+from dispatch.mock_psa.console_routes import router as console_router
 from dispatch.mock_psa.database import create_db_engine, create_schema, utc_now
+from dispatch.mock_psa.dependencies import (
+    CompanyFilter,
+    DBSession,
+    Limit,
+    Offset,
+    RecordID,
+    SearchQuery,
+    require_write_mode,
+)
 from dispatch.mock_psa.models import (
     Company,
     Contact,
@@ -20,6 +29,7 @@ from dispatch.mock_psa.models import (
     TicketPriority,
     TicketStatus,
 )
+from dispatch.mock_psa.run_manager import RunManager
 from dispatch.mock_psa.schemas import (
     BodyCreate,
     CompanyResponse,
@@ -31,27 +41,6 @@ from dispatch.mock_psa.schemas import (
     TicketResponse,
     TicketUpdate,
 )
-
-Limit = Annotated[int, Query(ge=1, le=100, description="Maximum records, from 1 to 100.")]
-Offset = Annotated[int, Query(ge=0, le=10_000, description="Records to skip, from 0 to 10000.")]
-RecordID = Annotated[int, Path(gt=0, le=2**63 - 1)]
-CompanyFilter = Annotated[int | None, Query(gt=0, le=2**63 - 1)]
-SearchQuery = Annotated[str | None, Query(min_length=1, max_length=200)]
-
-
-def get_session(request: Request) -> Iterator[Session]:
-    """Provide one DB session per request, closing it even after a failed request."""
-    with request.app.state.session_factory() as session:
-        yield session
-
-
-DBSession = Annotated[Session, Depends(get_session)]
-
-
-def require_write_mode(request: Request) -> None:
-    """Guard tool-write routes independently of the MCP server; intake stays enabled."""
-    if request.app.state.read_only:
-        raise HTTPException(status_code=403, detail="Tool writes are disabled in read-only mode")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -65,7 +54,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             create_schema(engine)
             app.state.session_factory = sessionmaker(engine)
             app.state.read_only = config.read_only
-            yield
+            app.state.mcp_settings = load_mcp_settings()
+            manager = RunManager(
+                app.state.session_factory, app.state.mcp_settings, read_only=config.read_only
+            )
+            app.state.run_manager = manager
+            manager.recover()
+            try:
+                yield
+            finally:
+                await manager.close()
         finally:
             engine.dispose()
 
@@ -184,7 +182,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dependencies=[Depends(require_write_mode)],
     )
     def create_draft(ticket_id: RecordID, payload: BodyCreate, session: DBSession):
-        """Store supplied reply text as draft only; no approval or sending endpoint exists."""
+        """Store supplied reply text as draft only; this MCP-facing route never approves/sends."""
         require_ticket(ticket_id, session)
         draft = DraftReply(ticket_id=ticket_id, body=payload.body)
         session.add(draft)
@@ -222,6 +220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session.refresh(ticket)
         return ticket
 
+    app.include_router(console_router)
     return app
 
 

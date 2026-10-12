@@ -60,7 +60,11 @@ def create_db_engine(database_url: str) -> Engine:
 
 
 def create_schema(engine: Engine) -> None:
-    """Create missing tables; this does not migrate existing schemas."""
+    """Initialize a fresh schema or verify current version; legacy upgrades are explicit."""
     from dispatch.mock_psa import models  # noqa: F401
+    from dispatch.mock_psa.migrate import SCHEMA_VERSION, check_schema
 
+    check_schema(engine)
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(f"PRAGMA user_version={SCHEMA_VERSION}")

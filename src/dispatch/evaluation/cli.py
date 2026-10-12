@@ -156,3 +156,7 @@ async def _evaluate(arguments) -> int:
             payload["state"] = "interrupted_or_failed"
         payload["finished_at"] = datetime.now(UTC).isoformat()
         report.write(payload)
+
+
+if __name__ == "__main__":
+    eval_main()

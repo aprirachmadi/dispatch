@@ -78,7 +78,15 @@ def records(engine):
     with engine.connect() as connection:
         return {
             table: connection.exec_driver_sql(f"SELECT * FROM {table} ORDER BY id").all()
-            for table in ("companies", "contacts", "tickets", "notes", "draft_replies")
+            for table in (
+                "companies",
+                "contacts",
+                "tickets",
+                "notes",
+                "draft_replies",
+                "backend_audit",
+                "triage_runs",
+            )
         }
 
 

@@ -202,3 +202,35 @@ async def test_input_limit_prevents_network_call():
     async with OpenAICompatibleClient(settings, transport=httpx2.MockTransport(handler)) as client:
         with pytest.raises(LLMError, match="input exceeded"):
             await client.generate("Trusted", "x" * 60000, Draft)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("effort", [None, "none", "low", "high"])
+async def test_reasoning_effort_only_when_explicit(effort):
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx2.Response(200, json=completion('{"body":"Synthetic draft"}'))
+
+    settings = ModelSettings(base_url="http://localhost/v1", model="test", reasoning_effort=effort)
+    async with OpenAICompatibleClient(settings, transport=httpx2.MockTransport(handler)) as client:
+        await client.generate("Trusted", "Synthetic", Draft)
+    if effort is None:
+        assert "reasoning_effort" not in bodies[0]
+    else:
+        assert bodies[0]["reasoning_effort"] == effort
+
+
+def test_separate_reasoning_settings(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for prefix in ("OPENAI_", "DISPATCH_JUDGE_"):
+        monkeypatch.setenv(prefix + "BASE_URL", "http://localhost/v1")
+        monkeypatch.setenv(prefix + "MODEL", "synthetic")
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "none")
+    monkeypatch.setenv("DISPATCH_JUDGE_REASONING_EFFORT", "")
+    assert load_model_settings().reasoning_effort == "none"
+    assert load_model_settings(judge=True).reasoning_effort is None
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "unsupported")
+    with pytest.raises(ValueError, match="REASONING_EFFORT"):
+        load_model_settings()

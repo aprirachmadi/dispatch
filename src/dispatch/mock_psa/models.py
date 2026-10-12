@@ -1,4 +1,4 @@
-"""Company, contact, ticket, and internal-note records for the synthetic PSA."""
+"""Synthetic PSA records, unsent reply reviews, and local job/audit journals."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -81,13 +81,67 @@ class Note(Base):
 
 
 class DraftReply(Base):
-    """An unsent reply; Phase 3 has no approval/sending transition at any layer."""
+    """An unsent reply. Approval records review, never delivery."""
 
     __tablename__ = "draft_replies"
-    __table_args__ = (CheckConstraint("status = 'draft'", name="draft_only_status"),)
+    __table_args__ = (
+        CheckConstraint("status IN ('draft', 'approved')", name="draft_status"),
+        CheckConstraint("revision >= 1", name="positive_revision"),
+        CheckConstraint(
+            "(status = 'draft' AND approved_at IS NULL) OR "
+            "(status = 'approved' AND approved_at IS NOT NULL)",
+            name="approval_timestamp",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"), index=True)
     body: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="draft", server_default="draft")
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+
+    revision: Mapped[int] = mapped_column(default=1, server_default="1")
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+    approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+
+
+class BackendAudit(Base):
+    """Metadata only; successful technician changes commit with their audit row."""
+
+    __tablename__ = "backend_audit"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    action: Mapped[str] = mapped_column(String(40))
+    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"))
+    draft_id: Mapped[int | None] = mapped_column(ForeignKey("draft_replies.id"))
+    revision: Mapped[int | None]
+    run_id: Mapped[str | None] = mapped_column(String(36))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now, index=True)
+
+
+class TriageRun(Base):
+    """Local single-worker job journal; never automatically replay interrupted writes."""
+
+    __tablename__ = "triage_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('running','completed','incomplete','failed','interrupted')",
+            name="run_state",
+        ),
+        CheckConstraint(
+            "(state = 'running' AND active_slot IS NOT NULL AND active_slot = 1) OR "
+            "(state != 'running' AND active_slot IS NULL)",
+            name="active_run",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    active_slot: Mapped[int | None] = mapped_column(unique=True)
+    state: Mapped[str] = mapped_column(String(20), default="running")
+    mode: Mapped[str] = mapped_column(String(10))
+    ticket_id: Mapped[int | None]
+    limit: Mapped[int]
+    model: Mapped[str] = mapped_column(String(200))
+    prompt_version: Mapped[str] = mapped_column(String(40))
+    results_json: Mapped[str] = mapped_column(Text, default="[]")
+    message: Mapped[str | None] = mapped_column(String(300))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime())

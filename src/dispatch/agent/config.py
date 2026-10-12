@@ -19,6 +19,8 @@ class ModelSettings(BaseModel):
     token_parameter: Literal["max_tokens", "max_completion_tokens"] = "max_tokens"
     output_mode: Literal["text", "json_object", "json_schema"] = "text"
 
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None = None
+
     @model_validator(mode="after")
     def trusted_endpoint(self):
         try:
@@ -61,6 +63,7 @@ def load_model_settings(*, judge: bool = False) -> ModelSettings:
         "max_tokens": os.getenv(prefix + "MAX_TOKENS", "2048"),
         "token_parameter": os.getenv(prefix + "TOKEN_PARAMETER", "max_tokens"),
         "output_mode": os.getenv(prefix + "OUTPUT_MODE", "text"),
+        "reasoning_effort": os.getenv(prefix + "REASONING_EFFORT", "").strip() or None,
     }
     try:
         return ModelSettings(**values)
@@ -68,5 +71,6 @@ def load_model_settings(*, judge: bool = False) -> ModelSettings:
         # Do not expose Pydantic's input values: they can include credentials.
         raise ValueError(
             f"Invalid {prefix} configuration. Set BASE_URL and MODEL; check API_KEY, "
-            "timeouts, token limit, TOKEN_PARAMETER and OUTPUT_MODE. See .env.example."
+            "timeouts, token limit, TOKEN_PARAMETER, OUTPUT_MODE and REASONING_EFFORT. "
+            "See .env.example."
         ) from None

@@ -8,6 +8,7 @@ from dispatch.mcp_server.providers.base import ProviderError, ReadOnlyError
 from dispatch.mcp_server.providers.mock_psa import MockPSAProvider
 from dispatch.mcp_server.providers.models import TicketChanges
 from dispatch.mock_psa.database import Base, create_db_engine, create_schema
+from dispatch.mock_psa.migrate import migrate
 from dispatch.mock_psa.models import Company, DraftReply, Note, Ticket
 from dispatch.settings import parse_read_only
 
@@ -100,7 +101,7 @@ def test_missing_ticket_and_no_approval_route(write_client):
     assert write_client.post("/drafts/1/approve").status_code == 404
 
 
-def test_database_rejects_approval_even_directly(write_client):
+def test_database_rejects_approval_without_timestamp(write_client):
     engine = write_client.app.state.session_factory.kw["bind"]
     with Session(engine) as session:
         session.add(DraftReply(ticket_id=1, body="Test", status="approved"))
@@ -108,7 +109,7 @@ def test_database_rejects_approval_even_directly(write_client):
             session.commit()
 
 
-def test_existing_phase_two_database_gets_only_additive_table(tmp_path):
+def test_phase_two_database_upgrade_preserves_ticket(tmp_path):
     url = f"sqlite:///{tmp_path / 'old.db'}"
     engine = create_db_engine(url)
     try:
@@ -126,6 +127,9 @@ def test_existing_phase_two_database_gets_only_additive_table(tmp_path):
             ticket = Ticket(company=company, subject="Preserved", description="Original")
             session.add(ticket)
             session.commit()
+        with pytest.raises(RuntimeError, match="explicit migration"):
+            create_schema(engine)
+        assert migrate(url).is_file()
         create_schema(engine)
         with Session(engine) as session:
             assert session.get(Ticket, 1).subject == "Preserved"
