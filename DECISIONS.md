@@ -608,3 +608,14 @@
   unsaved navigation, lost job-start response, polling disconnect/resume, read-only
   mode, literal injection/HTML text, UTC reports, and delayed draft-page races.
 - No `.env` or demo-database edits, reset/reseed, Docker work, or automatic commit.
+
+
+## Documentation conventions
+
+- README is the product entry point: purpose, screenshot, capabilities, minimal setup,
+  the live queue command, and the live/offline distinction. No phase plans or development diary.
+- Task-specific guides in docs/ hold model/triage, console/checks, offline evaluation,
+  database/REST, MCP/analytics, and contributor/test/example details.
+- Engineering history remains here; retained planning artifacts are not the product quickstart.
+- Commands use installed application modules, one-worker job-safe launches, explicit
+  write opt-ins, and instructions that preserve the existing synthetic demo database.

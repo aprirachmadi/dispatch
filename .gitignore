@@ -15,3 +15,5 @@ data/
 *.backup-*.sqlite3
 .impeccable/questions/
 .impeccable/review/
+.deepeval/
+.impeccable/
