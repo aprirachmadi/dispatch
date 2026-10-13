@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Dispatch — Technician console</title>
+    <link rel="stylesheet" href="assets/console.css" />
+    <script type="module" src="assets/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to workspace</a>
+    <header class="app-header">
+      <a class="brand" href="#tickets"
+        ><span class="brand-mark" aria-hidden="true">D</span>Dispatch<span
+          class="brand-description"
+          >Technician console</span
+        ></a
+      >
+      <div class="header-meta">
+        <span>Synthetic local demo</span
+        ><span id="policy" class="badge">Checking server policy</span
+        ><a href="/docs" target="_blank" rel="noopener">API docs</a>
+      </div>
+    </header>
+    <div class="app-shell">
+      <nav class="app-nav" aria-label="Main navigation">
+        <a href="#tickets" data-view="tickets">Tickets</a>
+        <a href="#runs" data-view="runs">Triage runs</a>
+        <a href="#reports" data-view="reports">Weekly report</a>
+        <a href="#audit" data-view="audit">Audit</a>
+        <p class="nav-note">
+          A response stays unsent.<br />Even after approval.
+        </p>
+      </nav>
+      <main id="main" tabindex="-1">
+        <div id="view"><p class="loading">Opening workspace…</p></div>
+      </main>
+    </div>
+    <div
+      id="announcements"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    ></div>
+    <noscript
+      ><p class="notice">
+        JavaScript is needed for this REST-backed console. API documentation
+        remains available at /docs.
+      </p></noscript
+    >
+  </body>
+</html>
