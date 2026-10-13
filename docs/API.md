@@ -165,11 +165,13 @@ Existing REST/MCP shapes and tools remain unchanged:
 | Endpoint               | Added behavior                                                                                                                                                            |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /console/config`  | Public `read_only` boolean only; no secrets, endpoints, paths, or model-liveness claim                                                                                    |
-| `GET /console/tickets` | Queue envelope: `tickets`, truthful matching `total`, `limit`, `offset`, `next_offset`; company summary, nullable saved attention, linked draft ID, draft/approved counts |
+| `GET /console/tickets` | Queue envelope: `tickets`, truthful matching `total`, `limit`, `offset`, `next_offset`; company summary, nullable saved attention and urgency, linked draft ID, draft/approved counts |
 | `GET /triage/runs`     | Newest-first paged summaries without generated bodies; use the existing by-ID endpoint for results                                                                        |
 
-Queue filters mirror `/tickets` plus `attention=required|not_flagged|not_assessed`. Saved attention
-is filtered **before pagination**, using the same latest-valid-of-100 completion-marker projection
+Queue filters mirror `/tickets` plus `attention=required|not_flagged|not_assessed` and
+`urgency=immediate|same_day|routine|not_assessed`. Saved urgency is distinct from ticket priority;
+missing or invalid assessments return `urgency: null` and match only `not_assessed`. Both saved
+filters are applied **before pagination**, using the same latest-valid-of-100 completion-marker projection
 as ticket assessment detail. A bounded scan exceeding 2,000 base-filtered tickets fails with 503;
 narrow filters rather than interpreting a partial count as a total. Run/audit pagination warns when
 its 10,000-offset limit prevents further scanning. Large IDs/revisions beyond JavaScript

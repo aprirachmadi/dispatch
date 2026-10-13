@@ -288,6 +288,38 @@ def test_queue_filters_reports_and_audit(browser_server, browser_page):
     expect(page.get_by_role("heading", name="MCP events")).to_be_visible()
 
 
+def test_saved_urgency_filter_preserves_url_and_distinct_priority_colors(
+    browser_server, browser_page
+):
+    page = browser_page
+    server = browser_server[0]
+    for ticket_id, priority in [(31, "urgent"), (32, "low"), (33, "medium"), (34, "high")]:
+        assert page.request.patch(f"{server}/tickets/{ticket_id}", data={"priority": priority}).ok
+    page.goto(f"{server}/console/#tickets?status=&offset=25")
+    colors = []
+    for ticket_id, label in [(31, "Urgent"), (32, "Low"), (33, "Medium"), (34, "High")]:
+        row = page.get_by_role("link", name=f"Ticket {ticket_id}:", exact=False)
+        chip = row.get_by_text(label, exact=True)
+        expect(chip).to_be_visible()
+        colors.append(chip.evaluate("el => getComputedStyle(el).backgroundColor"))
+    assert len(set(colors)) == 4
+    page.get_by_label("Saved urgency", exact=True).select_option("immediate")
+    page.get_by_role("button", name="Filter queue").click()
+    expect(page.get_by_label("Ticket queue")).to_contain_text("1 matches")
+    expect(page.get_by_text("Urgency: Immediate", exact=True)).to_be_visible()
+    assert "urgency=immediate" in page.url and "offset=0" in page.url
+    page.get_by_role("link", name="Ticket 31:", exact=False).click()
+    expect(page.get_by_role("heading", name="Saved assessment", exact=True)).to_be_visible()
+    page.reload()
+    expect(page.get_by_label("Saved urgency", exact=True)).to_have_value("immediate")
+    heading = page.locator(".case-heading")
+    expect(heading.get_by_text("Urgent", exact=True)).to_have_class("badge error")
+    expect(heading.get_by_text("Attention required", exact=True)).to_have_class("badge warning")
+    page.get_by_label("Saved urgency", exact=True).select_option("routine")
+    page.get_by_role("button", name="Filter queue").click()
+    expect(page.get_by_role("heading", name="No matching tickets", exact=True)).to_be_visible()
+
+
 def test_phone_reflow_back_and_literal_html(browser_server, browser_page):
     page = browser_page
     page.set_viewport_size({"width": 390, "height": 844})

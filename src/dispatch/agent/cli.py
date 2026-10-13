@@ -27,11 +27,16 @@ def triage_main() -> None:
         action="store_true",
         help="Persist allowed writes; requires DISPATCH_READ_ONLY=false",
     )
-    parser.add_argument(
-        "--ticket-id", type=int, help="One existing new ticket instead of the queue"
-    )
-    parser.add_argument(
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--ticket-id", type=int, help="One existing new ticket instead of the queue")
+    scope.add_argument(
         "--limit", type=int, default=5, help="Process at most 1–20 untriaged tickets"
+    )
+    scope.add_argument(
+        "--all",
+        dest="all_tickets",
+        action="store_true",
+        help="Process the whole new-ticket queue sequentially; stop on the first failure",
     )
     parser.add_argument("--base-url", help="Override the PSA REST URL (not the model endpoint)")
     parser.add_argument(
@@ -79,6 +84,7 @@ async def _triage(arguments) -> int:
         "started_at": datetime.now(UTC).isoformat(),
         "state": "running",
         "mode": "apply" if arguments.apply else "preview",
+        "scope": "all" if arguments.all_tickets else "ticket" if arguments.ticket_id else "batch",
         "model": model_settings.model,
         "prompt_version": PROMPT_VERSION,
         "results": [],
@@ -91,6 +97,8 @@ async def _triage(arguments) -> int:
         records[result.ticket_id] = result.model_dump(mode="json")
         payload["results"] = list(records.values())
         report.write(payload)
+        if arguments.all_tickets and result.state in {"applied", "preview", "skipped", "failed"}:
+            print(f"Ticket #{result.ticket_id}: {result.state}", flush=True)
 
     try:
         results = await run_connected(
@@ -99,6 +107,7 @@ async def _triage(arguments) -> int:
             apply=arguments.apply,
             limit=arguments.limit,
             ticket_id=arguments.ticket_id,
+            all_tickets=arguments.all_tickets,
             progress=progress,
         )
         for result in results:

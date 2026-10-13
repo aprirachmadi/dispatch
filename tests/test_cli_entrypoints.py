@@ -40,6 +40,8 @@ def test_module_help_is_executable_without_configuration_or_files(module, tmp_pa
     [
         (triage_cli.triage_main, ["--limit", "0"]),
         (triage_cli.triage_main, ["--ticket-id", str(2**63)]),
+        (triage_cli.triage_main, ["--all", "--ticket-id", "31"]),
+        (triage_cli.triage_main, ["--all", "--limit", "20"]),
         (eval_cli.eval_main, ["--limit", "101"]),
         (eval_cli.eval_main, ["--calibrate-judge", "--no-judge"]),
         (checks.checks_main, ["--week-start", "2026-10-13"]),
@@ -139,6 +141,37 @@ def test_triage_apply_denied_before_service_or_report(tmp_path, monkeypatch, cap
         triage_cli.triage_main()
     assert error.value.code == 1 and not output.exists()
     assert "No automatic retries" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("apply", [False, True])
+def test_triage_all_cli_checkpoints_every_result(tmp_path, monkeypatch, apply):
+    monkeypatch.setattr(
+        triage_cli,
+        "load_model_settings",
+        lambda: ModelSettings(base_url="http://127.0.0.1:9999", model="synthetic"),
+    )
+    monkeypatch.setattr(triage_cli, "load_settings", lambda: MCPSettings(read_only=not apply))
+
+    async def run(model_settings, mcp_settings, **options):
+        assert options["all_tickets"] and options["ticket_id"] is None
+        assert options["apply"] is apply
+        results = [
+            TriageResult(ticket_id=i, state="applied" if apply else "preview") for i in range(1, 26)
+        ]
+        for result in results:
+            options["progress"](result)
+        return results
+
+    monkeypatch.setattr(triage_cli, "run_connected", run)
+    output = tmp_path / "all.json"
+    args = ["dispatch", "--all", "--output", str(output)]
+    monkeypatch.setattr(sys, "argv", args + (["--apply"] if apply else []))
+    with pytest.raises(SystemExit) as error:
+        triage_cli.triage_main()
+    assert error.value.code == 0
+    report = json.loads(output.read_text())
+    assert report["scope"] == "all" and report["state"] == "completed"
+    assert [r["ticket_id"] for r in report["results"]] == list(range(1, 26))
 
 
 @pytest.mark.parametrize("failure", [None, "draft"])

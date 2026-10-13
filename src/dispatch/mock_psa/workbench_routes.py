@@ -37,10 +37,11 @@ def queue(
     priority: TicketPriority | None = None,
     status: TicketStatus | None = None,
     attention: Literal["required", "not_flagged", "not_assessed"] | None = None,
+    urgency: Literal["immediate", "same_day", "routine", "not_assessed"] | None = None,
     limit: Limit = 25,
     offset: Offset = 0,
 ):
-    """Filter saved attention before pagination; fail explicitly beyond bounded scan."""
+    """Filter saved attention/urgency before pagination; fail beyond bounded scan."""
     statement = select(Ticket, Company.name).join(Company).order_by(Ticket.id)
     if query is not None:
         text = query.strip()
@@ -74,8 +75,12 @@ def queue(
             if saved.requires_attention
             else "not_flagged"
         )
-        if attention is None or attention == state:
-            filtered.append((ticket, company_name, saved))
+        if attention is not None and attention != state:
+            continue
+        saved_urgency = "not_assessed" if saved is None else saved.assessment.urgency
+        if urgency is not None and urgency != saved_urgency:
+            continue
+        filtered.append((ticket, company_name, saved))
     page = filtered[offset : offset + limit]
     ids = [ticket.id for ticket, _, _ in page]
     counts = {
@@ -103,6 +108,7 @@ def queue(
                 status=ticket.status,
                 created_at=ticket.created_at,
                 requires_attention=None if saved is None else saved.requires_attention,
+                urgency=None if saved is None else saved.assessment.urgency,
                 assessment_draft_id=None if saved is None else saved.draft_id,
                 draft_count=counts[ticket.id].total if ticket.id in counts else 0,
                 approved_count=counts[ticket.id].approved if ticket.id in counts else 0,

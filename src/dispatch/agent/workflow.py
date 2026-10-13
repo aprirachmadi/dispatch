@@ -274,6 +274,44 @@ async def run_batch(
             item.status != TicketStatus.NEW for item in queue.tickets
         ):
             raise WorkflowError("Queue returned duplicate, unordered, or non-new tickets.")
+    return await _triage_ids(gateway, model, ids, limit=limit, apply=apply, progress=progress)
+
+
+async def run_all(
+    gateway: MCPGateway,
+    model: ModelClient,
+    *,
+    apply: bool = False,
+    progress: Callable[[TriageResult], None] | None = None,
+) -> list[TriageResult]:
+    """Snapshot the paged new queue, then visit each ticket once without a run limit."""
+    if apply and not gateway.writes_allowed:
+        raise WorkflowError("Apply mode requires explicitly enabled writes.")
+    ids = []
+    for offset in range(0, 10_001, MAX_QUEUE_SCAN):
+        queue = await gateway.call(
+            "search_tickets",
+            {"status": "new", "limit": MAX_QUEUE_SCAN, "offset": offset},
+            TicketSearchResult,
+        )
+        page_ids = [item.id for item in queue.tickets]
+        if (
+            queue.offset != offset
+            or queue.limit != MAX_QUEUE_SCAN
+            or page_ids != sorted(set(page_ids))
+            or (ids and page_ids and page_ids[0] <= ids[-1])
+            or any(item.status != TicketStatus.NEW for item in queue.tickets)
+        ):
+            raise WorkflowError("Queue pagination returned inconsistent or unordered tickets.")
+        ids.extend(page_ids)
+        if len(page_ids) < MAX_QUEUE_SCAN:
+            break
+    else:
+        raise WorkflowError("Queue exceeds the provider pagination limit; no tickets processed.")
+    return await _triage_ids(gateway, model, ids, limit=None, apply=apply, progress=progress)
+
+
+async def _triage_ids(gateway, model, ids, *, limit, apply, progress):
     results = []
     processed = 0
     for record_id in ids:
@@ -286,6 +324,6 @@ async def run_batch(
             break
         if result.state != "skipped":
             processed += 1
-        if processed >= limit:
+        if limit is not None and processed >= limit:
             break
     return results

@@ -6,10 +6,12 @@ import {
   enumOptions,
   categories,
   priorities,
+  urgencies,
   statuses,
   link,
   attention,
   badge,
+  priorityBadge,
   name,
   pager,
   button,
@@ -29,6 +31,7 @@ export async function ticketsView(root, params, app) {
     category: params.get("category") || "",
     priority: params.get("priority") || "",
     attention: params.get("attention") || "",
+    urgency: params.get("urgency") || "",
     offset: Number(params.get("offset") || 0),
     limit: 25,
   };
@@ -96,6 +99,10 @@ export async function ticketsView(root, params, app) {
     ],
     filters.attention,
   );
+  const urgency = select(
+    [...enumOptions(urgencies, "All urgencies"), ["not_assessed", "Not assessed"]],
+    filters.urgency,
+  );
   const form = el("form", {
     class: "filters",
     onSubmit: (event) => {
@@ -108,6 +115,7 @@ export async function ticketsView(root, params, app) {
           category: category.value,
           priority: priority.value,
           attention: flag.value,
+          urgency: urgency.value,
           offset: 0,
           ticket: null,
         }),
@@ -122,6 +130,7 @@ export async function ticketsView(root, params, app) {
     field("Company", company),
     field("Category", category),
     field("Priority", priority),
+    field("Saved urgency", urgency),
     field("Saved attention", flag),
     el("button", { type: "submit", class: "primary" }, "Filter queue"),
   );
@@ -140,10 +149,7 @@ export async function ticketsView(root, params, app) {
         "div",
         { class: "row-top" },
         el("span", { class: "ticket-id" }, `#${ticket.id}`),
-        badge(
-          name(ticket.priority),
-          ticket.priority === "urgent" ? "warning" : "",
-        ),
+        priorityBadge(ticket.priority),
       ),
       el("strong", {}, ticket.subject),
       el("p", {}, `${ticket.company_name} · ${name(ticket.category)}`),
@@ -151,6 +157,7 @@ export async function ticketsView(root, params, app) {
         "div",
         { class: "actions" },
         attention(ticket.requires_attention),
+        ticket.urgency ? badge(`Urgency: ${name(ticket.urgency)}`) : null,
         ticket.draft_count
           ? badge(
               `${ticket.draft_count - ticket.approved_count} drafts · ${ticket.approved_count} approved`,
@@ -177,7 +184,7 @@ export async function ticketsView(root, params, app) {
     el(
       "p",
       { class: "muted" },
-      "Attention reflects saved model assessment only. Unassessed does not mean safe.",
+      "Urgency and attention reflect saved model assessments only. Unassessed does not mean safe.",
     ),
   );
   if (!current) {

@@ -52,6 +52,7 @@ def test_queue_unknown_attention_and_legacy_shape(client):
     item = client.get("/console/tickets").json()
     assert item["total"] == 1 and item["next_offset"] is None
     assert item["tickets"][0]["requires_attention"] is None
+    assert item["tickets"][0]["urgency"] is None
     assert item["tickets"][0]["company_name"] == "Synthetic Maple"
     assert item["tickets"][0]["draft_count"] == 0
     assert client.get("/console/tickets?attention=not_flagged").json()["total"] == 0
@@ -100,6 +101,39 @@ def test_attention_filter_applied_before_pagination(write_client):
     assert first["tickets"][0]["id"] < second["tickets"][0]["id"]
 
 
+def test_saved_urgency_filter_before_pagination_and_independent_of_priority(write_client):
+    ids = {}
+    for urgency in ["routine", "same_day", "immediate", "not_assessed", "immediate"]:
+        ticket_id = write_client.post(
+            "/tickets",
+            json={"company_id": 1, "subject": urgency, "description": "Synthetic"},
+        ).json()["id"]
+        ids.setdefault(urgency, []).append(ticket_id)
+        if urgency != "not_assessed":
+            saved(write_client, ticket_id, labels={**LABELS, "urgency": urgency})
+        write_client.patch(f"/tickets/{ticket_id}", json={"priority": "low"})
+    for urgency in ["routine", "same_day", "immediate"]:
+        response = write_client.get(
+            "/console/tickets", params={"urgency": urgency, "priority": "low"}
+        ).json()
+        assert [t["id"] for t in response["tickets"]] == ids[urgency]
+        assert all(t["urgency"] == urgency for t in response["tickets"])
+    first = write_client.get("/console/tickets?urgency=immediate&limit=1").json()
+    second = write_client.get("/console/tickets?urgency=immediate&limit=1&offset=1").json()
+    assert first["total"] == 2 and first["next_offset"] == 1
+    assert second["next_offset"] is None
+    assert [first["tickets"][0]["id"], second["tickets"][0]["id"]] == ids["immediate"]
+    missing = write_client.get("/console/tickets?urgency=not_assessed&priority=low").json()
+    assert [t["id"] for t in missing["tickets"]] == ids["not_assessed"]
+    assert missing["tickets"][0]["urgency"] is None
+    assert (
+        write_client.get("/console/tickets?urgency=immediate&attention=not_assessed").json()[
+            "total"
+        ]
+        == 0
+    )
+
+
 def test_projection_bound_and_wrong_ticket_draft(write_client):
     other = write_client.post(
         "/tickets", json={"company_id": 1, "subject": "Other", "description": "Synthetic"}
@@ -130,6 +164,7 @@ def test_projection_bound_and_wrong_ticket_draft(write_client):
         "offset=-1",
         "offset=10001",
         "attention=safe",
+        "urgency=urgent",
         "query=%20",
         "status=bad",
         "company_id=0",

@@ -21,7 +21,7 @@ DISPATCH_READ_ONLY=true poetry run uvicorn dispatch.mock_psa.main:app \
 
 Open **<http://127.0.0.1:8000/console/>**. All four areas use the actual REST API:
 
-- **Tickets:** company/status/category/priority/text filters, saved attention, original
+- **Tickets:** company/status/category/priority/text filters, saved urgency and attention, original
   source/company/contact/notes, saved assessment and historical ticket links, and paged draft
   review. No assessment means **Not assessed**, not “safe.” The queue defaults to new tickets; All
   statuses includes retained historical and additional demo work.

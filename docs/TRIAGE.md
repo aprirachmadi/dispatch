@@ -32,11 +32,26 @@ mode. The command persists assessments and unsent drafts for **untriaged new tic
 historical/in-progress/resolved/closed scenario. The fresh seed contains 24 new tickets; your
 retained database may differ.
 
-After a successful batch, inspect its results and repeat the same command for the remaining eligible
-tickets. Completed markers are skipped. On failed/partial/uncertain results, stop and inspect the
-report and saved records instead of blindly rerunning. The queue scans only its first 100 new
-records; it does not exhaust larger queues. Do not run a UI background triage job or another CLI
-agent concurrently.
+To process the entire eligible queue in one command, use `--all` instead of `--limit`:
+
+```bash
+OPENAI_OUTPUT_MODE=json_schema DISPATCH_READ_ONLY=false \
+poetry run python -m dispatch.agent.cli \
+  --apply --all --base-url http://127.0.0.1:8000
+```
+
+`--all` snapshots IDs across the paginated new-ticket queue before generation, then processes
+each ticket sequentially in one model/MCP session, with no per-run ticket limit. It supports Preview too: omit `--apply`.
+Completed markers are skipped, so saved drafts are not regenerated; Preview visits each candidate
+once even though it saves no completion markers. Tickets arriving after the snapshot wait for a
+later run. Do not combine `--all` with `--limit` or `--ticket-id`.
+
+On failed/partial/uncertain results, the whole command stops and exits nonzero. Inspect the report
+and saved records instead of blindly rerunning. All results and write checkpoints share one local
+JSON report. The underlying provider caps offsets at 10,000: if the queue fills the final 100-record
+page, `--all` fails before generation or ticket writes rather than claiming an exhaustive run.
+Ordinary `--limit` batches scan only the first 100 new records. Do not run a UI background triage job
+or another CLI agent concurrently.
 
 Refresh the console to see saved attention and drafts. CLI runs write local JSON reports, not the
 UI's persisted background-run history; use **Triage runs** in the console if you want server-managed
@@ -156,8 +171,8 @@ already have committed. Inspect report, audit and persisted records before retry
 rollback or blindly rerun a partial run. The completion-note marker skips successfully triaged
 tickets on later runs; it is a demo convenience, **not** transactional idempotency or
 authentication. Truncated source notes require manual review. Concurrent agent runs are unsupported,
-and edits between the final read and writes remain possible. Queue scanning is capped at the first
-100 new records; this is not a promise to exhaust a larger queue.
+and edits between the final read and writes remain possible. Ordinary batch scanning is capped at the first
+100 new records; `--all` traverses pages within the provider offset limit described above.
 
 After testing, stop the write-mode API and restart it with `DISPATCH_READ_ONLY=true`. An attention
 flag is technician-visible data, not automated paging, remediation or an SLA timer. Human review

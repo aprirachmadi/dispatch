@@ -98,12 +98,21 @@ poetry run python -m dispatch.agent.cli \
   --apply --limit 20 --base-url http://127.0.0.1:8000
 ```
 
-Processes up to **20 untriaged new tickets**. After a successful batch, inspect results and repeat
-for remaining tickets; completed tickets are skipped. In-progress, resolved, and closed tickets are
-not re-triaged. The fresh seed has 24 new tickets.
+Processes up to **20 untriaged new tickets**. To process the whole eligible queue in one command:
 
-Stop on failed/partial/uncertain results and inspect the printed report before retrying. Do not run
-CLI and UI triage concurrently. Refresh the workbench to see saved flags and drafts.
+```bash
+OPENAI_OUTPUT_MODE=json_schema DISPATCH_READ_ONLY=false \
+poetry run python -m dispatch.agent.cli \
+  --apply --all --base-url http://127.0.0.1:8000
+```
+
+`--all` reads the paginated new-ticket queue at startup and processes it one ticket at a time until
+finished or a failure occurs. Completed tickets are skipped. In-progress, resolved, and closed tickets are not re-triaged.
+The fresh seed has 24 new tickets. Newly arriving tickets wait for the next command.
+
+Both modes stop on failed/partial/uncertain results; inspect the printed report and saved records
+before retrying. Do not run CLI and UI triage concurrently. Refresh the workbench to see saved flags
+and drafts.
 [Batch limits, preview, recovery, and run-history details](docs/TRIAGE.md).
 
 ## Live triage vs. offline evaluation

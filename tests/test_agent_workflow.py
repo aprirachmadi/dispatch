@@ -11,14 +11,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dispatch.agent.llm import LLMError
-from dispatch.agent.models import Assessment, Draft, History, Problem
+from dispatch.agent.models import Assessment, Draft, History, Problem, TriageResult
 from dispatch.agent.prompts import classify, draft_response
 from dispatch.agent.reporting import RunFile
-from dispatch.agent.workflow import MCPGateway, WorkflowError, run_batch, skip_reason
+from dispatch.agent.workflow import MCPGateway, WorkflowError, run_all, run_batch, skip_reason
 from dispatch.domain import TicketStatus
 from dispatch.mcp_server.config import MCPSettings
 from dispatch.mcp_server.providers.mock_psa import MockPSAProvider
-from dispatch.mcp_server.providers.models import NoteRecord, TicketDetail, TicketSummary
+from dispatch.mcp_server.providers.models import (
+    NoteRecord,
+    TicketDetail,
+    TicketSearchResult,
+    TicketSummary,
+)
 from dispatch.mcp_server.server import create_server
 from dispatch.mcp_server.services.models import SimilarityResult, SimilarMatch
 from dispatch.mock_psa.models import DraftReply, Ticket
@@ -315,3 +320,74 @@ async def test_marker_like_employee_text_does_not_skip(agent_mcp):
         update={"author_name": "Dispatch MCP", "body": "Dispatch triage v1 " + "[" * 2000}
     )
     assert skip_reason(source.model_copy(update={"notes": [note]})) is None
+
+
+async def test_all_apply_processes_whole_queue_and_skips_completed(agent_mcp, write_client):
+    for i in range(24):
+        assert (
+            write_client.post(
+                "/tickets",
+                json={"company_id": 1, "subject": f"Synthetic {i}", "description": "Test"},
+            ).status_code
+            == 201
+        )
+    model = ScriptedModel()
+    results = await run_all(agent_mcp, model, apply=True)
+    assert len(results) == 25 and all(r.state == "applied" for r in results)
+    assert len(model.calls) == 50
+    with write_client.app.state.session_factory() as session:
+        assert len(session.scalars(select(DraftReply)).all()) == 25
+    again = ScriptedModel()
+    assert all(r.state == "skipped" for r in await run_all(agent_mcp, again, apply=True))
+    assert not again.calls
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("failure", [None, "failed", "partial"])
+async def test_all_pages_past_completed_first_page_and_never_replays(
+    agent_mcp, monkeypatch, apply, failure
+):
+    from dispatch.agent import workflow
+
+    source = await agent_mcp.get_ticket(1)
+    tickets = [source.model_copy(update={"id": i}) for i in range(1, 126)]
+    pages = []
+    processed = []
+
+    class Queue:
+        writes_allowed = True
+
+        async def call(self, name, arguments, schema):
+            assert name == "search_tickets"
+            offset = arguments["offset"]
+            pages.append(offset)
+            return TicketSearchResult(
+                tickets=[
+                    TicketSummary.model_validate(t.model_dump(exclude={"notes", "notes_truncated"}))
+                    for t in tickets[offset : offset + 100]
+                ],
+                limit=100,
+                offset=offset,
+            )
+
+        async def get_ticket(self, ticket_id):
+            assert pages == [0, 100]  # Snapshot before processing, including writes.
+            return tickets[ticket_id - 1]
+
+    async def triage(gateway, model, ticket, **options):
+        processed.append(ticket.id)
+        state = "skipped" if ticket.id <= 100 else "applied" if apply else "preview"
+        if failure and ticket.id == 122:
+            state = failure
+        return TriageResult(ticket_id=ticket.id, state=state)
+
+    monkeypatch.setattr(workflow, "triage_ticket", triage)
+    results = await run_all(Queue(), ScriptedModel(), apply=apply)
+    assert processed == list(range(1, 123 if failure else 126))
+    assert len(results) == len(processed)
+    assert results[-1].state == (failure or ("applied" if apply else "preview"))
+
+
+async def test_all_denies_writes_before_queue_scan(agent_mcp):
+    with pytest.raises(WorkflowError, match="enabled writes"):
+        await run_all(MCPGateway(agent_mcp.client), ScriptedModel(), apply=True)

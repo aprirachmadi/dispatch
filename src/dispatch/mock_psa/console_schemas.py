@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dispatch.agent.models import Assessment, TriageResult
+from dispatch.agent.models import Assessment, TriageResult, Urgency
 from dispatch.domain import TicketCategory, TicketPriority, TicketStatus
 from dispatch.mock_psa.schemas import Description, ORMResponse, PositiveID
 
@@ -83,6 +83,7 @@ class QueueTicket(BaseModel):
     status: TicketStatus
     created_at: datetime
     requires_attention: bool | None
+    urgency: Urgency | None
     assessment_draft_id: int | None
     draft_count: int
     approved_count: int

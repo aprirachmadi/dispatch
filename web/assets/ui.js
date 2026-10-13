@@ -23,6 +23,11 @@ export const link = (label, hash, attrs = {}) =>
   el("a", { href: hash, ...attrs }, label);
 export const badge = (text, tone = "") =>
   el("span", { class: `badge ${tone}` }, text);
+export const priorityBadge = (priority) =>
+  badge(
+    name(priority),
+    { medium: "info", high: "warning", urgent: "error" }[priority] || "",
+  );
 export const notice = (text, tone = "") =>
   el("p", { class: `notice ${tone}` }, text);
 export function empty(title, text) {
@@ -158,6 +163,7 @@ export const categories = [
   "alerts",
 ];
 export const priorities = ["low", "medium", "high", "urgent"];
+export const urgencies = ["immediate", "same_day", "routine"];
 export const statuses = ["new", "in_progress", "resolved", "closed"];
 export const enumOptions = (values, all = "All") => [
   ["", all],

@@ -11,7 +11,7 @@ from mcp.client.stdio import StdioServerParameters
 from dispatch.agent.config import ModelSettings
 from dispatch.agent.llm import OpenAICompatibleClient
 from dispatch.agent.models import TriageResult
-from dispatch.agent.workflow import MCPGateway, WorkflowError, run_batch
+from dispatch.agent.workflow import MCPGateway, WorkflowError, run_all, run_batch
 from dispatch.mcp_server.config import MCPSettings
 
 
@@ -22,11 +22,14 @@ async def run_connected(
     apply: bool = False,
     limit: int = 5,
     ticket_id: int | None = None,
+    all_tickets: bool = False,
     progress: Callable[[TriageResult], None] | None = None,
 ) -> list[TriageResult]:
     """Own an MCP subprocess and model connection; preview always forces read-only tools."""
     if apply and mcp_settings.read_only:
         raise WorkflowError("Apply requires explicitly enabled writes.")
+    if all_tickets and ticket_id is not None:
+        raise ValueError("All-queue mode cannot select a single ticket.")
     config = replace(mcp_settings, read_only=not apply)
     parameters = StdioServerParameters(
         command=sys.executable,
@@ -44,8 +47,11 @@ async def run_connected(
         OpenAICompatibleClient(model_settings) as model,
         Client(parameters, read_timeout_seconds=180) as client,
     ):
+        gateway = MCPGateway(client, writes_allowed=apply)
+        if all_tickets:
+            return await run_all(gateway, model, apply=apply, progress=progress)
         return await run_batch(
-            MCPGateway(client, writes_allowed=apply),
+            gateway,
             model,
             limit=limit,
             ticket_id=ticket_id,
