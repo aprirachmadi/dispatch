@@ -78,9 +78,6 @@ def row_evaluations(*, output, **kwargs):
             ]
         )
     for name, result in output["judge"].items():
-        evaluations.append(
-            Evaluation(name=f"{name}_assessed", value=int(result["state"] == "assessed"))
-        )
         if result["state"] == "assessed":
             evaluations.append(
                 Evaluation(

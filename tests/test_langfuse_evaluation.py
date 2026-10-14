@@ -65,7 +65,7 @@ def test_unassessed_metrics_do_not_become_zero_or_pass_scores():
     }
     scores = {item.name: item for item in row_evaluations(output=row)}
     assert "correctness_safety" not in scores
-    assert scores["correctness_safety_assessed"].value == 0
+    assert "correctness_safety_assessed" not in scores
     assert scores["assessment_consistency"].value == 0.7
     assert scores["assessment_consistency"].comment == "Minor omission"
     assert scores["classification_exact_match"].value == 1

@@ -60,10 +60,10 @@ or the dataset's runs. The report also includes the experiment ID and dashboard 
 `--validate-only` performs local validation without Langfuse or model requests.
 
 Each item has classification field/exact-match and draft-completion scores. Existing
-DeepEval GEval scores and reasons are reused as Langfuse Evaluations; unassessed metrics
-get a coverage indicator and no fabricated quality score. Aggregate experiment scores
-reuse the existing classification accuracies, macro F1, critical recalls, completion,
-judge coverage, assessed means and provisional pass rates. Local JSON reports, rubric,
+DeepEval GEval scores and reasons are reused as Langfuse Evaluations. Unassessed metrics
+have no per-item score. Aggregate experiment scores reuse the existing classification
+accuracies, macro F1, critical recalls, completion, judge coverage, assessed means and
+provisional pass rates. Local JSON reports, rubric,
 0.8 provisional threshold, generation prompts and exit semantics are preserved.
 Execution remains sequential. Each experiment task owns its model clients in the SDK's
 async loop, avoiding cross-loop HTTP connection reuse.
