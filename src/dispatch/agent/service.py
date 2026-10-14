@@ -13,6 +13,7 @@ from dispatch.agent.llm import OpenAICompatibleClient
 from dispatch.agent.models import TriageResult
 from dispatch.agent.workflow import MCPGateway, WorkflowError, run_all, run_batch
 from dispatch.mcp_server.config import MCPSettings
+from dispatch.observability import flush_langfuse
 
 
 async def run_connected(
@@ -43,18 +44,21 @@ async def run_connected(
             "DISPATCH_MODEL_CACHE_PATH": str(config.model_cache_path),
         },
     )
-    async with (
-        OpenAICompatibleClient(model_settings) as model,
-        Client(parameters, read_timeout_seconds=180) as client,
-    ):
-        gateway = MCPGateway(client, writes_allowed=apply)
-        if all_tickets:
-            return await run_all(gateway, model, apply=apply, progress=progress)
-        return await run_batch(
-            gateway,
-            model,
-            limit=limit,
-            ticket_id=ticket_id,
-            apply=apply,
-            progress=progress,
-        )
+    try:
+        async with (
+            OpenAICompatibleClient(model_settings) as model,
+            Client(parameters, read_timeout_seconds=180) as client,
+        ):
+            gateway = MCPGateway(client, writes_allowed=apply)
+            if all_tickets:
+                return await run_all(gateway, model, apply=apply, progress=progress)
+            return await run_batch(
+                gateway,
+                model,
+                limit=limit,
+                ticket_id=ticket_id,
+                apply=apply,
+                progress=progress,
+            )
+    finally:
+        flush_langfuse()

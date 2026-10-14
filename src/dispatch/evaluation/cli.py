@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from dispatch import observability
 from dispatch.agent.config import load_model_settings
 from dispatch.agent.llm import LLMError, OpenAICompatibleClient
 from dispatch.agent.prompts import PROMPT_VERSION
@@ -35,6 +36,10 @@ def eval_main() -> None:
     parser.add_argument(
         "--output", type=Path, help="New local JSON report path; never overwrite another run"
     )
+    parser.add_argument(
+        "--import-langfuse", action="store_true", help="Import the full dataset without model calls"
+    )
+    parser.add_argument("--langfuse-dataset", help="Override the Langfuse dataset name")
     arguments = parser.parse_args()
     if arguments.limit is not None and not 1 <= arguments.limit <= 100:
         parser.error("--limit must be 1–100")
@@ -59,9 +64,32 @@ async def _evaluate(arguments) -> int:
     if arguments.validate_only:
         print(f"VALID: {len(cases)} cases; SHA-256={digest}. No model calls or PSA access.")
         return 0
+    langfuse = observability.get_langfuse()
+    items = None
+    if langfuse is not None:
+        from dispatch.evaluation.langfuse import import_dataset
+
+        if not langfuse.auth_check():
+            raise ValueError("Langfuse project API authentication failed")
+        items = import_dataset(
+            langfuse,
+            cases,
+            digest=digest,
+            name=arguments.langfuse_dataset
+            or ("dispatch/judge-calibration" if arguments.calibrate_judge else "dispatch/triage"),
+        )
+    if arguments.import_langfuse:
+        if langfuse is None:
+            raise ValueError(
+                "Configure LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY"
+            )
+        print(f"Imported {len(items)} Langfuse dataset items. No model calls.")
+        return 0
     full_count = len(cases)
     if arguments.limit is not None:
         cases = cases[: arguments.limit]
+        if items is not None:
+            items = items[: arguments.limit]
     # Validate all required settings before issuing any model requests.
     agent_settings = None if arguments.calibrate_judge else load_model_settings()
     judge_settings = None if arguments.no_judge else load_model_settings(judge=True)
@@ -97,30 +125,47 @@ async def _evaluate(arguments) -> int:
         print(f"Completed {len(rows)}/{len(cases)}")
 
     try:
+        experiment_rows = None
+        if langfuse is not None:
+            from dispatch.evaluation.langfuse import run_experiment
+
+            experiment_rows = run_experiment(
+                langfuse,
+                cases,
+                items=items,
+                payload=payload,
+                agent_settings=agent_settings,
+                judge_settings=judge_settings,
+                judge_type=judge_type,
+                progress=progress,
+            )
         if arguments.calibrate_judge:
-            async with judge_type(judge_settings) as judge:
-                rows = []
-                for case in cases:
-                    scores = await judge.score(case.case, case.assessment, case.draft)
-                    expected = {
-                        "correctness_safety": case.expected_quality_pass,
-                        "assessment_consistency": case.expected_consistency_pass,
-                    }
-                    agreements = {
-                        name: score.get("passes_provisional_threshold") == expected[name]
-                        if score["state"] == "assessed"
-                        else None
-                        for name, score in scores.items()
-                    }
-                    rows.append(
-                        {
-                            "case_id": case.case.case_id,
-                            "judge": scores,
-                            "expected_pass": expected,
-                            "agrees_with_fixture": agreements,
+            if experiment_rows is not None:
+                rows = experiment_rows
+            else:
+                async with judge_type(judge_settings) as judge:
+                    rows = []
+                    for case in cases:
+                        scores = await judge.score(case.case, case.assessment, case.draft)
+                        expected = {
+                            "correctness_safety": case.expected_quality_pass,
+                            "assessment_consistency": case.expected_consistency_pass,
                         }
-                    )
-                    progress(rows)
+                        agreements = {
+                            name: score.get("passes_provisional_threshold") == expected[name]
+                            if score["state"] == "assessed"
+                            else None
+                            for name, score in scores.items()
+                        }
+                        rows.append(
+                            {
+                                "case_id": case.case.case_id,
+                                "judge": scores,
+                                "expected_pass": expected,
+                                "agrees_with_fixture": agreements,
+                            }
+                        )
+                        progress(rows)
             incomplete = any(
                 score["state"] != "assessed" for row in rows for score in row["judge"].values()
             )
@@ -134,12 +179,17 @@ async def _evaluate(arguments) -> int:
                 "or automatic threshold tuning.",
             }
         else:
-            async with OpenAICompatibleClient(agent_settings) as model:
-                if judge_type:
-                    async with judge_type(judge_settings) as judge:
-                        rows = await evaluate_cases(cases, model, judge=judge, progress=progress)
-                else:
-                    rows = await evaluate_cases(cases, model, progress=progress)
+            if experiment_rows is not None:
+                rows = experiment_rows
+            else:
+                async with OpenAICompatibleClient(agent_settings) as model:
+                    if judge_type:
+                        async with judge_type(judge_settings) as judge:
+                            rows = await evaluate_cases(
+                                cases, model, judge=judge, progress=progress
+                            )
+                    else:
+                        rows = await evaluate_cases(cases, model, progress=progress)
             payload["summary"] = summarize(cases, rows, judge_requested=judge_type is not None)
             incomplete = any(row["draft_state"] != "valid" for row in rows) or any(
                 score["state"] != "assessed" for row in rows for score in row["judge"].values()
@@ -156,6 +206,7 @@ async def _evaluate(arguments) -> int:
             payload["state"] = "interrupted_or_failed"
         payload["finished_at"] = datetime.now(UTC).isoformat()
         report.write(payload)
+        observability.flush_langfuse()
 
 
 if __name__ == "__main__":

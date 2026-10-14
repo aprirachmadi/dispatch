@@ -9,6 +9,7 @@ from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel, ValidationError
 
 from dispatch.agent.config import ModelSettings
+from dispatch.observability import observation
 
 T = TypeVar("T", bound=BaseModel)
 MAX_PROMPT_CHARACTERS = 60_000
@@ -88,33 +89,75 @@ class OpenAICompatibleClient:
                 "type": "json_schema",
                 "json_schema": {"name": schema.__name__, "strict": True, "schema": output_schema},
             }
-        try:
-            async with asyncio.timeout(self.settings.timeout_seconds):
-                response = await self.client.chat.completions.create(
-                    model=self.settings.model,
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    **options,
+        with observation(
+            "llm." + schema.__name__,
+            as_type="generation",
+            model=self.settings.model,
+            input=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            model_parameters={
+                self.settings.token_parameter: self.settings.max_tokens,
+                "output_mode": self.settings.output_mode,
+                "reasoning_effort": self.settings.reasoning_effort,
+            },
+        ) as generation:
+            try:
+                async with asyncio.timeout(self.settings.timeout_seconds):
+                    response = await self.client.chat.completions.create(
+                        model=self.settings.model,
+                        messages=[
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user},
+                        ],
+                        **options,
+                    )
+                usage = response.usage
+                usage_details = None
+                if usage is not None:
+                    usage_details = {
+                        key: value
+                        for key, value in {
+                            "input": usage.prompt_tokens,
+                            "output": usage.completion_tokens,
+                            "total": usage.total_tokens,
+                        }.items()
+                        if type(value) is int and value >= 0
+                    }
+                    details = getattr(usage, "prompt_tokens_details", None)
+                    cached = getattr(details, "cached_tokens", None)
+                    prompt_tokens = usage_details.get("input")
+                    if (
+                        type(cached) is int
+                        and prompt_tokens is not None
+                        and 0 <= cached <= prompt_tokens
+                    ):
+                        # Langfuse sums input* subcategories; cached tokens are already
+                        # included in the provider's prompt_tokens count.
+                        usage_details["input"] = prompt_tokens - cached
+                        usage_details["input_cached_tokens"] = cached
+                    usage_details = usage_details or None
+                generation.update(
+                    model=response.model or self.settings.model,
+                    output=response.model_dump(mode="json"),
+                    usage_details=usage_details,
                 )
-            if (
-                not isinstance(getattr(response, "choices", None), list)
-                or len(response.choices) != 1
-            ):
-                raise LLMError("Model returned an unexpected number of choices.")
-            choice = response.choices[0]
-            if (
-                getattr(choice, "finish_reason", None) != "stop"
-                or getattr(choice, "message", None) is None
-                or choice.message.refusal
-                or choice.message.tool_calls
-                or choice.message.function_call
-                or not isinstance(choice.message.content, str)
-            ):
-                raise LLMError("Model refused, truncated, or returned an unsupported response.")
-            return parse_output(choice.message.content, schema)
-        except (OpenAIError, httpx2.HTTPError, TimeoutError):
-            raise LLMError(
-                "Model request failed; check endpoint, model, credentials and timeout."
-            ) from None
+                if (
+                    not isinstance(getattr(response, "choices", None), list)
+                    or len(response.choices) != 1
+                ):
+                    raise LLMError("Model returned an unexpected number of choices.")
+                choice = response.choices[0]
+                if (
+                    getattr(choice, "finish_reason", None) != "stop"
+                    or getattr(choice, "message", None) is None
+                    or choice.message.refusal
+                    or choice.message.tool_calls
+                    or choice.message.function_call
+                    or not isinstance(choice.message.content, str)
+                ):
+                    raise LLMError("Model refused, truncated, or returned an unsupported response.")
+                return parse_output(choice.message.content, schema)
+            except (OpenAIError, httpx2.HTTPError, TimeoutError) as error:
+                generation.update(level="ERROR", status_message=type(error).__name__)
+                raise LLMError(
+                    "Model request failed; check endpoint, model, credentials and timeout."
+                ) from None

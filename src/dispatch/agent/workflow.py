@@ -19,6 +19,7 @@ from dispatch.mcp_server.providers.models import (
     TicketSummary,
 )
 from dispatch.mcp_server.services.models import SimilarityResult
+from dispatch.observability import observation
 
 NOTE_PREFIX = "Dispatch triage v1 "
 MAX_QUEUE_SCAN = 100
@@ -142,6 +143,27 @@ def skip_reason(ticket: TicketDetail) -> str | None:
 
 
 async def triage_ticket(
+    gateway: MCPGateway,
+    model: ModelClient,
+    ticket: TicketDetail,
+    *,
+    apply: bool = False,
+    progress: Callable[[TriageResult], None] | None = None,
+) -> TriageResult:
+    """Group classification and drafting under one ticket request trace."""
+    with observation(
+        "dispatch.triage_ticket",
+        input={"ticket_id": ticket.id, "apply": apply},
+        metadata={"ticket_id": ticket.id, "workflow": "triage"},
+    ) as trace:
+        result = await _triage_ticket(gateway, model, ticket, apply=apply, progress=progress)
+        trace.update(output=result.model_dump(mode="json"))
+        if result.state in {"failed", "partial"}:
+            trace.update(level="ERROR", status_message=result.message)
+        return result
+
+
+async def _triage_ticket(
     gateway: MCPGateway,
     model: ModelClient,
     ticket: TicketDetail,

@@ -70,3 +70,11 @@ def write_client(client):
     url = client.app.state.session_factory.kw["bind"].url.render_as_string()
     with TestClient(create_app(Settings(database_url=url, read_only=False))) as writable:
         yield writable
+
+
+@pytest.fixture(autouse=True)
+def no_external_observability(monkeypatch):
+    """Unit tests never export project data using credentials from the developer .env."""
+    monkeypatch.setattr("dispatch.observability.get_langfuse", lambda: None)
+    for name in ("LANGFUSE_BASE_URL", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+        monkeypatch.setenv(name, "")

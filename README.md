@@ -143,3 +143,10 @@ no automatic approval, remediation, ticket closing, or sending.
 - [MCP integration, similarity, and reporting](docs/MCP.md)
 - [Development, tests, and editable examples](docs/DEVELOPMENT.md)
 - [Engineering decisions and development history](DECISIONS.md)
+
+## Langfuse
+
+Configure the three `LANGFUSE_*` project API settings to trace live model calls and record
+benchmark/evaluation Experiments with the existing DeepEval metrics. See
+[setup, dataset import, Docker connectivity and verification](docs/LANGFUSE.md).
+Sessions remain unconfigured.
