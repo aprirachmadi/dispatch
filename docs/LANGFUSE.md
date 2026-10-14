@@ -23,9 +23,17 @@ are recorded where available. JSON validation failures are errors too.
 
 There is no automatic OpenAI instrumentation, so requests are not exported twice.
 DeepEval's existing Confident AI tracing/telemetry opt-outs remain enabled.
+MCP server middleware enriches the existing SDK tool observations with allowed arguments
+and successful structured results, without creating another tool span. Tool failures record
+a sanitized error output. The MCP subprocess initializes its own exporter and flushes when
+it closes; W3C trace context links its tools to the calling workflow.
+
 Exporter failures do not change generation results. CLI/workflow completion flushes telemetry.
 Prompts and responses are intentionally stored in your configured Langfuse project;
 application API keys are not part of exported metadata or errors.
+
+Restart the running application/MCP process to pick up instrumentation changes. Existing
+observations with missing tool inputs/outputs are not backfilled; new calls capture payloads.
 
 ## Datasets and Experiments
 
